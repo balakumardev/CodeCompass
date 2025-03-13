@@ -1,0 +1,54 @@
+plugins {
+    id 'java'
+    id 'org.jetbrains.intellij' version '1.17.2'
+}
+
+group = 'dev.balakumar'
+version = '1.0.0'
+
+repositories {
+    mavenCentral()
+}
+
+intellij {
+    version = '2023.1'
+    type = 'IC'
+    plugins = ['Kotlin']
+    downloadSources = false
+    updateSinceUntilBuild = false
+}
+
+dependencies {
+    implementation 'com.squareup.okhttp3:okhttp:4.9.2'
+    implementation 'com.google.code.gson:gson:2.10.1'
+
+    // For vector search
+    implementation 'com.github.jelmerk:hnswlib-core:1.1.0'
+
+    // For better text processing
+    implementation 'org.apache.commons:commons-text:1.10.0'
+}
+
+tasks.buildSearchableOptions {
+    enabled = false
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+runIde {
+    // Increase memory allocation
+    jvmArgs = ['-Xmx2048m', '-Xms512m']
+    // Add this to help diagnose crashes
+    jvmArgs += ['-XX:+HeapDumpOnOutOfMemoryError']
+}
+
+patchPluginXml {
+    sinceBuild = '231'
+    untilBuild = '243.*'
+    changeNotes = """
+      Enhanced CodeMapper with vector search capabilities.
+      """
+}

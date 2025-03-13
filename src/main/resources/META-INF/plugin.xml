@@ -1,0 +1,31 @@
+<idea-plugin>
+    <!-- Basic plugin metadata -->
+    <name>CodeCompass</name>
+    <id>dev.balakumar.codecompass</id>
+    <version>1.0.0</version>
+    <vendor email="mail@balakumar.dev" url="https://balakumar.dev">Bala Kumar</vendor>
+
+    <description>
+        A plugin that indexes project files with AI embeddings (via OllamaService),
+        then provides a search UI for semantic code search.
+    </description>
+
+    <!-- The IntelliJ versions this plugin can load in -->
+    <idea-version since-build="231" until-build="243.*" />
+
+    <!-- Register the startup indexer -->
+    <extensions defaultExtensionNs="com.intellij">
+        <postStartupActivity implementation="dev.balakumar.codecompass.StartupIndexer"/>
+    </extensions>
+
+    <!-- Actions: We only need the Search Action to appear in the Tools menu -->
+    <actions>
+        <action
+                id="com.codemapper.searchAction"
+                class="dev.balakumar.codecompass.SearchAction"
+                text="Search with CodeMapper"
+                description="Embeds and searches project code files using AI embeddings">
+            <add-to-group group-id="ToolsMenu" anchor="last" />
+        </action>
+    </actions>
+</idea-plugin>
