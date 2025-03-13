@@ -10,8 +10,8 @@ import java.util.concurrent.TimeUnit;
 public class OllamaService {
     private static final String OLLAMA_EMBEDDING_ENDPOINT = "http://localhost:11434/api/embeddings";
     private static final String OLLAMA_GENERATION_ENDPOINT = "http://localhost:11434/api/generate";
-    private static final String EMBEDDING_MODEL = "starcoder2-embeddings"; // Good embedding model
-    private static final String GENERATION_MODEL = "deepseek-coder2:33b-instruct"; // For summaries and context
+    private static final String EMBEDDING_MODEL = "nomic-embed-text"; // Good embedding model
+    private static final String GENERATION_MODEL = "codellama:7b-code"; // For summaries and context
 
     private final OkHttpClient client = new OkHttpClient.Builder()
             .connectTimeout(240, TimeUnit.SECONDS)
