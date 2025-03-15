@@ -3,19 +3,13 @@ package dev.balakumar.codecompass;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.progress.ProgressIndicator;
-
 import java.io.IOException;
 import java.util.*;
-import java.util.Collections;
 
 public class SimpleIndexer {
     private final AIService aiService;
     private VectorDBService vectorDBService;
     private Project project;
-
-//    public SimpleIndexer() {
-//        this.aiService = ProviderSettings.getAIService();
-//    }
 
     public SimpleIndexer(Project project) {
         this.project = project;
@@ -70,14 +64,18 @@ public class SimpleIndexer {
             int batchSize = 5;
             System.out.println("Starting to index " + total + " files");
             for (int i = 0; i < files.size(); i += batchSize) {
-                if (indicator.isCanceled()) { break; }
+                if (indicator.isCanceled()) {
+                    break;
+                }
                 int endIndex = Math.min(i + batchSize, files.size());
                 for (int j = i; j < endIndex; j++) {
                     IndexedFile file = files.get(j);
                     String filePath = file.virtualFile.getPath();
                     indicator.setText("Processing: " + filePath);
                     indicator.setFraction((double) current / total);
-                    if (file.indexer.project == null) { file.indexer.project = project; }
+                    if (file.indexer.project == null) {
+                        file.indexer.project = project;
+                    }
                     if (vectorDBService == null && file.indexer.vectorDBService != null) {
                         vectorDBService = file.indexer.vectorDBService;
                     }
@@ -85,7 +83,9 @@ public class SimpleIndexer {
                     current++;
                     processed++;
                 }
-                if (vectorDBService != null) { vectorDBService.saveIndex(); }
+                if (vectorDBService != null) {
+                    vectorDBService.saveIndex();
+                }
                 System.out.println("Processed batch. Total processed: " + processed + " / " + total);
                 System.gc();
             }
@@ -113,10 +113,14 @@ public class SimpleIndexer {
     private static void collectDirectory(VirtualFile directory, SimpleIndexer indexer, List<IndexedFile> collector) {
         for (VirtualFile file : directory.getChildren()) {
             if (file.isDirectory()) {
-                if (shouldSkipDirectory(file.getName())) { continue; }
+                if (shouldSkipDirectory(file.getName())) {
+                    continue;
+                }
                 collectDirectory(file, indexer, collector);
             } else {
-                if (isCodeFile(file)) { collector.add(new IndexedFile(file, indexer)); }
+                if (isCodeFile(file)) {
+                    collector.add(new IndexedFile(file, indexer));
+                }
             }
         }
     }
@@ -133,8 +137,8 @@ public class SimpleIndexer {
         return ext.equals("java") || ext.equals("kt") || ext.equals("py") || ext.equals("js") ||
                 ext.equals("ts") || ext.equals("c") || ext.equals("cpp") || ext.equals("h") ||
                 ext.equals("cs") || ext.equals("go") || ext.equals("rs") || ext.equals("php") ||
-                ext.equals("rb") || ext.equals("scala") || ext.equals("groovy") ||
-                ext.equals("xml") || ext.equals("json");
+                ext.equals("rb") || ext.equals("scala") || ext.equals("groovy") || ext.equals("xml") ||
+                ext.equals("json");
     }
 
     public void indexSingleFile(VirtualFile file, SimpleIndexer indexer) {
@@ -148,12 +152,43 @@ public class SimpleIndexer {
                 System.out.println("Skipping binary file: " + file.getPath());
                 return;
             }
-            String summary = aiService.generateSummary(content, file.getName());
             Map<String, String> metadata = extractMetadata(file, content);
-            vectorDBService.addOrUpdateDocument(file.getPath(), content, file.getPath(), summary, metadata);
+            String language = getLanguageFromFileName(file.getName());
+            // Create enhanced text with metadata and content
+            StringBuilder enhancedText = new StringBuilder();
+            enhancedText.append("File: ").append(file.getName()).append("\n");
+            enhancedText.append("Language: ").append(language).append("\n");
+            if (metadata.containsKey("functions")) {
+                enhancedText.append("Functions: ").append(metadata.get("functions")).append("\n");
+            }
+            if (metadata.containsKey("classes")) {
+                enhancedText.append("Classes: ").append(metadata.get("classes")).append("\n");
+            }
+            enhancedText.append("Code:\n").append(content);
+            String summary = aiService.generateSummary(content, file.getName());
+            vectorDBService.addOrUpdateDocument(file.getPath(), enhancedText.toString(), file.getPath(), summary, metadata);
         } catch (Exception e) {
             System.err.println("Error indexing " + file.getPath() + ": " + e.getMessage());
         }
+    }
+
+    private String getLanguageFromFileName(String fileName) {
+        if (fileName.endsWith(".java")) return "Java";
+        if (fileName.endsWith(".kt")) return "Kotlin";
+        if (fileName.endsWith(".py")) return "Python";
+        if (fileName.endsWith(".js")) return "JavaScript";
+        if (fileName.endsWith(".ts")) return "TypeScript";
+        if (fileName.endsWith(".c") || fileName.endsWith(".cpp") || fileName.endsWith(".h")) return "C/C++";
+        if (fileName.endsWith(".cs")) return "C#";
+        if (fileName.endsWith(".go")) return "Go";
+        if (fileName.endsWith(".rs")) return "Rust";
+        if (fileName.endsWith(".php")) return "PHP";
+        if (fileName.endsWith(".rb")) return "Ruby";
+        if (fileName.endsWith(".scala")) return "Scala";
+        if (fileName.endsWith(".groovy")) return "Groovy";
+        if (fileName.endsWith(".xml")) return "XML";
+        if (fileName.endsWith(".json")) return "JSON";
+        return "code";
     }
 
     private Map<String, String> extractMetadata(VirtualFile file, String content) {
@@ -163,9 +198,13 @@ public class SimpleIndexer {
         metadata.put("size", String.valueOf(file.getLength()));
         metadata.put("lastModified", String.valueOf(file.getTimeStamp()));
         String ext = file.getExtension();
-        if ("java".equals(ext)) { extractJavaMetadata(content, metadata); }
-        else if ("py".equals(ext)) { extractPythonMetadata(content, metadata); }
-        else if ("js".equals(ext) || "ts".equals(ext)) { extractJavascriptMetadata(content, metadata); }
+        if ("java".equals(ext)) {
+            extractJavaMetadata(content, metadata);
+        } else if ("py".equals(ext)) {
+            extractPythonMetadata(content, metadata);
+        } else if ("js".equals(ext) || "ts".equals(ext)) {
+            extractJavascriptMetadata(content, metadata);
+        }
         return metadata;
     }
 
@@ -173,7 +212,9 @@ public class SimpleIndexer {
         String packagePattern = "package\\s+([\\w.]+)";
         java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(packagePattern);
         java.util.regex.Matcher matcher = pattern.matcher(content);
-        if (matcher.find()) { metadata.put("package", matcher.group(1)); }
+        if (matcher.find()) {
+            metadata.put("package", matcher.group(1));
+        }
         String classPattern = "class\\s+(\\w+)";
         pattern = java.util.regex.Pattern.compile(classPattern);
         matcher = pattern.matcher(content);
@@ -272,10 +313,13 @@ public class SimpleIndexer {
 
     public void reindexAll(Project project, ProgressIndicator indicator) {
         try {
-            if (vectorDBService != null) { vectorDBService.close(); }
+            if (vectorDBService != null) {
+                vectorDBService.close();
+            }
             CleanupService.cleanupIndexFiles(project.getBasePath());
-            try { vectorDBService = new VectorDBService(project.getBasePath(), aiService); }
-            catch (IOException e) {
+            try {
+                vectorDBService = new VectorDBService(project.getBasePath(), aiService);
+            } catch (IOException e) {
                 System.err.println("Error reinitializing vector database: " + e.getMessage());
                 indicator.setText("Error reinitializing vector database: " + e.getMessage());
                 return;
@@ -286,10 +330,29 @@ public class SimpleIndexer {
             e.printStackTrace();
         }
     }
+    public List<CodeSearchResult> search(String query, int limit, Map<String, String> filters) {
+        if (project == null) {
+            System.err.println("Error: Project is null in search method");
+            return Collections.emptyList();
+        }
+
+        if (vectorDBService == null) {
+            try {
+                vectorDBService = new VectorDBService(project.getBasePath(), aiService);
+            } catch (IOException e) {
+                System.err.println("Error initializing vector database for search: " + e.getMessage());
+                return Collections.emptyList();
+            }
+        }
+
+        return vectorDBService.search(query, limit, filters);
+    }
+
 
     public static class IndexedFile {
         public final VirtualFile virtualFile;
         public final SimpleIndexer indexer;
+
         public IndexedFile(VirtualFile virtualFile, SimpleIndexer indexer) {
             this.virtualFile = virtualFile;
             this.indexer = indexer;

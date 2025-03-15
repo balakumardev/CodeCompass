@@ -146,7 +146,6 @@ public class VectorDBService {
                     return -1;
                 }
                 String responseBody = response.body().string();
-                System.out.println("Collection info response: " + responseBody);
                 JsonObject jsonResponse = gson.fromJson(responseBody, JsonObject.class);
                 JsonObject result = jsonResponse.getAsJsonObject("result");
                 if (result == null) {
@@ -178,11 +177,48 @@ public class VectorDBService {
 
     private void createCollection() {
         try {
+            // Create a collection with optimized settings
             JsonObject vectorsConfig = new JsonObject();
             vectorsConfig.addProperty("size", dimensions);
             vectorsConfig.addProperty("distance", "Cosine");
+
+            // Add optimized index settings
+            JsonObject hnsw = new JsonObject();
+            hnsw.addProperty("m", 16);  // More connections per node for better recall
+            hnsw.addProperty("ef_construct", 100);  // Higher value for better index quality
+            hnsw.addProperty("full_scan_threshold", 10000);  // Threshold for full scan vs index
+            vectorsConfig.add("hnsw_config", hnsw);
+
+            // Add optimized quantization for faster search
+            JsonObject quantization = new JsonObject();
+            quantization.addProperty("scalar", true);
+            vectorsConfig.add("quantization_config", quantization);
+
             JsonObject createRequest = new JsonObject();
             createRequest.add("vectors", vectorsConfig);
+
+            // Add optimized schema for payload
+            JsonObject optimizedSchema = new JsonObject();
+
+            // Indexed fields for faster filtering
+            JsonObject filePathField = new JsonObject();
+            filePathField.addProperty("type", "keyword");
+            optimizedSchema.add("filePath", filePathField);
+
+            JsonObject languageField = new JsonObject();
+            languageField.addProperty("type", "keyword");
+            optimizedSchema.add("language", languageField);
+
+            JsonObject fileTypeField = new JsonObject();
+            fileTypeField.addProperty("type", "keyword");
+            optimizedSchema.add("fileType", fileTypeField);
+
+            JsonObject contentField = new JsonObject();
+            contentField.addProperty("type", "text");
+            optimizedSchema.add("content", contentField);
+
+            createRequest.add("schema", optimizedSchema);
+
             Request request = new Request.Builder()
                     .url(QDRANT_URL + "/collections/" + COLLECTION_NAME)
                     .put(RequestBody.create(gson.toJson(createRequest), MediaType.parse("application/json")))
@@ -264,27 +300,75 @@ public class VectorDBService {
                 deleteCollection();
                 createCollection();
             }
+
             long pointId = Math.abs(id.hashCode());
             JsonObject pointRequest = new JsonObject();
             pointRequest.addProperty("id", pointId);
+
             JsonArray vector = new JsonArray();
             for (float value : embedding) {
                 vector.add(value);
             }
             pointRequest.add("vector", vector);
+
+            // Enhanced payload with more structured data
             JsonObject payload = new JsonObject();
             payload.addProperty("filePath", filePath);
             payload.addProperty("summary", summary);
+            payload.addProperty("content", content);  // Store full content for RAG
+
+            // Extract file type from path
+            String fileType = "unknown";
+            if (filePath.contains(".")) {
+                fileType = filePath.substring(filePath.lastIndexOf(".") + 1);
+            }
+            payload.addProperty("fileType", fileType);
+
+            // Extract language from metadata or default to fileType
+            String language = metadata.getOrDefault("language", fileType);
+            payload.addProperty("language", language);
+
+            // Add structured code elements
+            if (metadata.containsKey("classes")) {
+                payload.addProperty("classes", metadata.get("classes"));
+            }
+
+            if (metadata.containsKey("functions")) {
+                payload.addProperty("functions", metadata.get("functions"));
+            }
+
+            if (metadata.containsKey("imports")) {
+                payload.addProperty("imports", metadata.get("imports"));
+            }
+
+            if (metadata.containsKey("package")) {
+                payload.addProperty("package", metadata.get("package"));
+            }
+
+            // Add timestamp for versioning
+            payload.addProperty("indexedAt", System.currentTimeMillis());
+
+            // Add remaining metadata
             JsonObject metadataJson = new JsonObject();
             for (Map.Entry<String, String> entry : metadata.entrySet()) {
-                metadataJson.addProperty(entry.getKey(), entry.getValue());
+                if (!entry.getKey().equals("classes") &&
+                        !entry.getKey().equals("functions") &&
+                        !entry.getKey().equals("imports") &&
+                        !entry.getKey().equals("package") &&
+                        !entry.getKey().equals("language")) {
+                    metadataJson.addProperty(entry.getKey(), entry.getValue());
+                }
             }
             payload.add("metadata", metadataJson);
+
             pointRequest.add("payload", payload);
+
             JsonArray points = new JsonArray();
             points.add(pointRequest);
+
             JsonObject requestBody = new JsonObject();
             requestBody.add("points", points);
+
             Request request = new Request.Builder()
                     .url(QDRANT_URL + "/collections/" + COLLECTION_NAME + "/points")
                     .put(RequestBody.create(gson.toJson(requestBody), MediaType.parse("application/json")))
@@ -305,16 +389,22 @@ public class VectorDBService {
     }
 
     public List<CodeSearchResult> search(String query, int limit) {
+        return search(query, limit, null);
+    }
+
+    public List<CodeSearchResult> search(String query, int limit, Map<String, String> filters) {
         try {
             if (!collectionExists) {
                 System.out.println("Warning: Collection does not exist");
                 return Collections.emptyList();
             }
+
             float[] queryEmbedding = aiService.getEmbedding(query);
             if (queryEmbedding.length != dimensions) {
                 System.out.println("Warning: Query embedding dimension (" + queryEmbedding.length + ") doesn't match index dimension (" + dimensions + ").");
                 return Collections.emptyList();
             }
+
             JsonObject searchRequest = new JsonObject();
             JsonArray vector = new JsonArray();
             for (float value : queryEmbedding) {
@@ -323,6 +413,24 @@ public class VectorDBService {
             searchRequest.add("vector", vector);
             searchRequest.addProperty("limit", limit);
             searchRequest.addProperty("with_payload", true);
+
+            // Add filters if provided
+            if (filters != null && !filters.isEmpty()) {
+                JsonObject filter = new JsonObject();
+                JsonArray must = new JsonArray();
+
+                for (Map.Entry<String, String> entry : filters.entrySet()) {
+                    JsonObject condition = new JsonObject();
+                    JsonObject match = new JsonObject();
+                    match.addProperty(entry.getKey(), entry.getValue());
+                    condition.add("match", match);
+                    must.add(condition);
+                }
+
+                filter.add("must", must);
+                searchRequest.add("filter", filter);
+            }
+
             Request request = new Request.Builder()
                     .url(QDRANT_URL + "/collections/" + COLLECTION_NAME + "/points/search")
                     .post(RequestBody.create(gson.toJson(searchRequest), MediaType.parse("application/json")))
@@ -341,7 +449,25 @@ public class VectorDBService {
                         String filePath = payload.get("filePath").getAsString();
                         String summary = payload.get("summary").getAsString();
                         Map<String, String> metadata = new HashMap<>();
-                        if (payload.has("metadata")) {
+
+                        // Extract content for RAG if available
+                        String content = "";
+                        if (payload.has("content") && !payload.get("content").isJsonNull()) {
+                            content = payload.get("content").getAsString();
+                        }
+
+                        // Extract all top-level string fields as metadata
+                        for (Map.Entry<String, JsonElement> entry : payload.entrySet()) {
+                            if (entry.getValue().isJsonPrimitive() &&
+                                    !entry.getKey().equals("filePath") &&
+                                    !entry.getKey().equals("summary") &&
+                                    !entry.getKey().equals("content")) {
+                                metadata.put(entry.getKey(), entry.getValue().getAsString());
+                            }
+                        }
+
+                        // Extract nested metadata if present
+                        if (payload.has("metadata") && payload.get("metadata").isJsonObject()) {
                             JsonObject metadataJson = payload.getAsJsonObject("metadata");
                             for (Map.Entry<String, JsonElement> entry : metadataJson.entrySet()) {
                                 if (entry.getValue().isJsonPrimitive()) {
@@ -349,7 +475,11 @@ public class VectorDBService {
                                 }
                             }
                         }
-                        searchResults.add(new CodeSearchResult(pointId, filePath, summary, score, metadata));
+
+                        // Create enhanced search result with content
+                        CodeSearchResult searchResult = new CodeSearchResult(pointId, filePath, summary, score, metadata);
+                        searchResult.setContent(content);
+                        searchResults.add(searchResult);
                     }
                     return searchResults;
                 } else {
@@ -386,4 +516,53 @@ public class VectorDBService {
     public void close() {
         // Nothing to close for the HTTP client.
     }
+
+    public List<String> getUniqueLanguages() {
+        try {
+            if (!collectionExists) {
+                return Collections.emptyList();
+            }
+
+            // Create a request to get unique language values
+            JsonObject aggregateRequest = new JsonObject();
+            JsonArray fields = new JsonArray();
+            fields.add("language");
+            aggregateRequest.add("fields", fields);
+            aggregateRequest.addProperty("limit", 100);
+
+            Request request = new Request.Builder()
+                    .url(QDRANT_URL + "/collections/" + COLLECTION_NAME + "/points/group")
+                    .post(RequestBody.create(gson.toJson(aggregateRequest), MediaType.parse("application/json")))
+                    .build();
+
+            try (Response response = client.newCall(request).execute()) {
+                if (response.isSuccessful()) {
+                    String responseBody = response.body().string();
+                    JsonObject jsonResponse = gson.fromJson(responseBody, JsonObject.class);
+
+                    List<String> languages = new ArrayList<>();
+                    if (jsonResponse.has("result") && jsonResponse.get("result").isJsonArray()) {
+                        JsonArray groups = jsonResponse.getAsJsonArray("result");
+                        for (JsonElement group : groups) {
+                            if (group.isJsonObject() && group.getAsJsonObject().has("hits")) {
+                                JsonArray hits = group.getAsJsonObject().getAsJsonArray("hits");
+                                if (hits.size() > 0) {
+                                    JsonObject hit = hits.get(0).getAsJsonObject();
+                                    if (hit.has("payload") && hit.getAsJsonObject("payload").has("language")) {
+                                        String language = hit.getAsJsonObject("payload").get("language").getAsString();
+                                        languages.add(language);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    return languages;
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("Error getting unique languages: " + e.getMessage());
+        }
+        return Collections.emptyList();
+    }
 }
+

@@ -1,5 +1,6 @@
 package dev.balakumar.codecompass;
 
+import java.util.Map;
 import okhttp3.*;
 import com.google.gson.*;
 import java.io.IOException;
@@ -7,19 +8,18 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 public class OpenRouterService implements AIService {
-    private static final String OPENROUTER_GENERATION_ENDPOINT = "https://openrouter.ai/api/v1/generate";
+    private static final String OPENROUTER_GENERATION_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
     private static final String GENERATION_MODEL = "google/gemini-2.0-flash-exp:free";
     private final OkHttpClient client = new OkHttpClient.Builder()
             .connectTimeout(240, TimeUnit.SECONDS)
             .readTimeout(240, TimeUnit.SECONDS)
             .build();
     private final Gson gson = new Gson();
-    private final String openRouterApiKey = System.getProperty("openrouter.apiKey", "apikey");
-    private final GoogleGeminiService geminiService = new GoogleGeminiService(); // For embeddings
+    private final String openRouterApiKey = System.getProperty("openrouter.apiKey", "dfdfd");
+    private final GoogleGeminiService geminiService = new GoogleGeminiService();
 
     @Override
     public float[] getEmbedding(String text) throws IOException {
-        // Use Gemini for embeddings
         return geminiService.getEmbedding(text);
     }
 
@@ -27,6 +27,7 @@ public class OpenRouterService implements AIService {
     public String generateSummary(String codeContent, String fileName) throws IOException {
         String truncatedCode = codeContent.length() > 8000 ? codeContent.substring(0, 8000) + "..." : codeContent;
         String language = getLanguageFromFileName(fileName);
+
         JsonObject jsonRequest = new JsonObject();
         jsonRequest.addProperty("model", GENERATION_MODEL);
         JsonArray messages = new JsonArray();
@@ -35,78 +36,24 @@ public class OpenRouterService implements AIService {
         message.addProperty("content", "Generate a concise summary (max 3 sentences) of this " + language + " file. Include main classes, methods, and functionality:\n\n" + truncatedCode);
         messages.add(message);
         jsonRequest.add("messages", messages);
+
         String jsonRequestString = gson.toJson(jsonRequest);
         Request request = new Request.Builder()
                 .url(OPENROUTER_GENERATION_ENDPOINT)
                 .header("Authorization", "Bearer " + openRouterApiKey)
+                .header("Content-Type", "application/json")
                 .post(RequestBody.create(jsonRequestString, MediaType.get("application/json")))
                 .build();
+
         try (Response response = client.newCall(request).execute()) {
             if (!response.isSuccessful()) {
                 String errorBody = response.body() != null ? response.body().string() : "";
-                throw new IOException("OpenRouter generation API error " + response + ": " + errorBody);
+                throw new IOException("OpenRouter generation API error " + response.code() + ": " + errorBody);
             }
-            String responseBody = response.body().string();
-            System.out.println("OpenRouter raw response: " + responseBody); // Log the raw response
-
-            String summary;
-            try {
-                // Try parsing as a JSON object with the expected structure
-                JsonObject jsonResponse = gson.fromJson(responseBody, JsonObject.class);
-                summary = jsonResponse.getAsJsonArray("choices")
-                        .get(0).getAsJsonObject()
-                        .getAsJsonObject("message")
-                        .get("content").getAsString();
-            } catch (JsonSyntaxException e) {
-                // Fallback: treat it as a plain string or primitive
-                if (responseBody.startsWith("\"") && responseBody.endsWith("\"")) {
-                    summary = responseBody.substring(1, responseBody.length() - 1); // Remove surrounding quotes
-                } else {
-                    summary = responseBody; // Use the raw response as-is
-                }
-            }
-            if (summary.length() > 500) {
-                summary = summary.substring(0, 497) + "...";
-            }
-            return summary;
-        } catch (Exception e) {
-            throw new IOException("Failed to process OpenRouter response: " + e.getMessage(), e);
-        }
-    }
-
-    @Override
-    public String generateCodeContext(String query, List<CodeSearchResult> results) throws IOException {
-        if (results.isEmpty()) {
-            return "No matching files found for query: " + query;
-        }
-        StringBuilder contextBuilder = new StringBuilder();
-        contextBuilder.append("Query: ").append(query).append("\n\n");
-        contextBuilder.append("Top matching files:\n\n");
-        for (int i = 0; i < Math.min(3, results.size()); i++) {
-            CodeSearchResult result = results.get(i);
-            contextBuilder.append("File: ").append(result.getFilePath()).append("\n");
-            contextBuilder.append("Summary: ").append(result.getSummary()).append("\n");
-            contextBuilder.append("Similarity: ").append(String.format("%.2f", result.getSimilarity())).append("\n\n");
-        }
-        JsonObject jsonRequest = new JsonObject();
-        jsonRequest.addProperty("model", GENERATION_MODEL);
-        JsonArray messages = new JsonArray();
-        JsonObject message = new JsonObject();
-        message.addProperty("role", "user");
-        message.addProperty("content", "Based on the query and matching files, provide a brief explanation of " +
-                "which files are most relevant and why:\n\n" + contextBuilder.toString());
-        messages.add(message);
-        jsonRequest.add("messages", messages);
-        String jsonRequestString = gson.toJson(jsonRequest);
-        Request request = new Request.Builder()
-                .url(OPENROUTER_GENERATION_ENDPOINT)
-                .header("Authorization", "Bearer " + openRouterApiKey)
-                .post(RequestBody.create(jsonRequestString, MediaType.get("application/json")))
-                .build();
-        try (Response response = client.newCall(request).execute()) {
-            if (!response.isSuccessful()) {
+            String contentType = response.header("Content-Type");
+            if (contentType == null || !contentType.contains("application/json")) {
                 String errorBody = response.body() != null ? response.body().string() : "";
-                throw new IOException("OpenRouter generation API error " + response + ": " + errorBody);
+                throw new IOException("Unexpected response type: " + contentType + ". Body: " + errorBody);
             }
             String responseBody = response.body().string();
             JsonObject jsonResponse = gson.fromJson(responseBody, JsonObject.class);
@@ -114,58 +61,178 @@ public class OpenRouterService implements AIService {
                     .get(0).getAsJsonObject()
                     .getAsJsonObject("message")
                     .get("content").getAsString();
-        } catch (JsonSyntaxException e) {
-            throw new IOException("Failed to parse OpenRouter code context response: " + e.getMessage(), e);
+        } catch (Exception e) {
+            throw new IOException("Failed to process OpenRouter response: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public String generateCodeContext(String query, List<CodeSearchResult> results) throws IOException {
+        JsonObject jsonRequest = new JsonObject();
+        jsonRequest.addProperty("model", GENERATION_MODEL);
+        JsonArray messages = new JsonArray();
+
+        // Create a more detailed prompt with code context
+        StringBuilder prompt = new StringBuilder();
+        prompt.append("Query: ").append(query).append("\n\n");
+
+        if (!results.isEmpty()) {
+            prompt.append("Here are the most relevant files:\n\n");
+
+            for (int i = 0; i < Math.min(5, results.size()); i++) {
+                CodeSearchResult result = results.get(i);
+                prompt.append("File ").append(i+1).append(": ").append(result.getFilePath()).append("\n");
+                prompt.append("Language: ").append(result.getLanguage()).append("\n");
+                prompt.append("Summary: ").append(result.getSummary()).append("\n");
+
+                // Add key metadata if available
+                if (result.getMetadata().containsKey("classes")) {
+                    prompt.append("Classes: ").append(result.getMetadata().get("classes")).append("\n");
+                }
+                if (result.getMetadata().containsKey("functions")) {
+                    prompt.append("Functions: ").append(result.getMetadata().get("functions")).append("\n");
+                }
+                prompt.append("\n");
+            }
+
+            prompt.append("Based on the query and these files, please explain which files are most relevant to the query and why. Focus on how these files relate to what the user is asking about.");
+        } else {
+            prompt.append("No relevant files found in the codebase. Please suggest what the user might be looking for and how to refine their search.");
+        }
+
+        JsonObject message = new JsonObject();
+        message.addProperty("role", "user");
+        message.addProperty("content", prompt.toString());
+        messages.add(message);
+        jsonRequest.add("messages", messages);
+
+        String jsonRequestString = gson.toJson(jsonRequest);
+        Request request = new Request.Builder()
+                .url(OPENROUTER_GENERATION_ENDPOINT)
+                .header("Authorization", "Bearer " + openRouterApiKey)
+                .header("Content-Type", "application/json")
+                .post(RequestBody.create(jsonRequestString, MediaType.get("application/json")))
+                .build();
+
+        try (Response response = client.newCall(request).execute()) {
+            if (!response.isSuccessful()) {
+                String errorBody = response.body() != null ? response.body().string() : "";
+                throw new IOException("OpenRouter generation API error " + response.code() + ": " + errorBody);
+            }
+            String responseBody = response.body().string();
+            JsonObject jsonResponse = gson.fromJson(responseBody, JsonObject.class);
+            return jsonResponse.getAsJsonArray("choices")
+                    .get(0).getAsJsonObject()
+                    .getAsJsonObject("message")
+                    .get("content").getAsString();
+        } catch (Exception e) {
+            throw new IOException("Failed to process OpenRouter response: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public String askQuestion(String question, List<CodeSearchResult> relevantFiles) throws IOException {
+        JsonObject jsonRequest = new JsonObject();
+        jsonRequest.addProperty("model", GENERATION_MODEL);
+        JsonArray messages = new JsonArray();
+
+        // System message to set context and expectations
+        JsonObject systemMessage = new JsonObject();
+        systemMessage.addProperty("role", "system");
+        systemMessage.addProperty("content", "You are an AI assistant specialized in analyzing and explaining code. " +
+                "Answer questions about the codebase using only the provided file contents. " +
+                "If you can't answer based on the provided files, say so clearly. " +
+                "Include code snippets in your explanations when relevant.");
+        messages.add(systemMessage);
+
+        // Build context from relevant files
+        StringBuilder context = new StringBuilder();
+        context.append("I'll answer your question based on these files from the codebase:\n\n");
+
+        // Include file contents for context
+        for (int i = 0; i < Math.min(3, relevantFiles.size()); i++) {
+            CodeSearchResult file = relevantFiles.get(i);
+            context.append("FILE ").append(i+1).append(": ").append(file.getFilePath()).append("\n");
+            context.append("```").append(file.getLanguage().toLowerCase()).append("\n");
+
+            // Use content if available, otherwise use metadata
+            if (file.getContent() != null && !file.getContent().isEmpty()) {
+                // Truncate if too long
+                String content = file.getContent();
+                if (content.length() > 6000) {
+                    content = content.substring(0, 6000) + "\n// ... [content truncated] ...";
+                }
+                context.append(content);
+            } else {
+                context.append("// Content not available. Summary: ").append(file.getSummary());
+
+                // Add metadata as comments
+                for (Map.Entry<String, String> entry : file.getMetadata().entrySet()) {
+                    if (!entry.getValue().isEmpty()) {
+                        context.append("\n// ").append(entry.getKey()).append(": ").append(entry.getValue());
+                    }
+                }
+            }
+
+            context.append("\n```\n\n");
+        }
+
+        // User message with question and context
+        JsonObject userMessage = new JsonObject();
+        userMessage.addProperty("role", "user");
+        userMessage.addProperty("content", "Question: " + question + "\n\n" + context.toString());
+        messages.add(userMessage);
+
+        jsonRequest.add("messages", messages);
+
+        // Add generation parameters
+        JsonObject parameters = new JsonObject();
+        parameters.addProperty("temperature", 0.2);  // Lower temperature for more factual responses
+        parameters.addProperty("max_tokens", 1500);  // Allow longer responses for detailed explanations
+        jsonRequest.add("parameters", parameters);
+
+        String jsonRequestString = gson.toJson(jsonRequest);
+        Request request = new Request.Builder()
+                .url(OPENROUTER_GENERATION_ENDPOINT)
+                .header("Authorization", "Bearer " + openRouterApiKey)
+                .header("Content-Type", "application/json")
+                .post(RequestBody.create(jsonRequestString, MediaType.get("application/json")))
+                .build();
+
+        try (Response response = client.newCall(request).execute()) {
+            if (!response.isSuccessful()) {
+                String errorBody = response.body() != null ? response.body().string() : "";
+                throw new IOException("OpenRouter generation API error " + response.code() + ": " + errorBody);
+            }
+            String responseBody = response.body().string();
+            JsonObject jsonResponse = gson.fromJson(responseBody, JsonObject.class);
+            return jsonResponse.getAsJsonArray("choices")
+                    .get(0).getAsJsonObject()
+                    .getAsJsonObject("message")
+                    .get("content").getAsString();
+        } catch (Exception e) {
+            throw new IOException("Failed to process OpenRouter response: " + e.getMessage(), e);
         }
     }
 
     @Override
     public boolean testConnection() {
-        try {
-            // Test OpenRouter connection
-            JsonObject jsonRequest = new JsonObject();
-            jsonRequest.addProperty("model", GENERATION_MODEL);
-            JsonArray messages = new JsonArray();
-            JsonObject message = new JsonObject();
-            message.addProperty("role", "user");
-            message.addProperty("content", "test");
-            messages.add(message);
-            jsonRequest.add("messages", messages);
-            String jsonRequestString = gson.toJson(jsonRequest);
-            Request request = new Request.Builder()
-                    .url(OPENROUTER_GENERATION_ENDPOINT)
-                    .header("Authorization", "Bearer " + openRouterApiKey)
-                    .post(RequestBody.create(jsonRequestString, MediaType.get("application/json")))
-                    .build();
-            try (Response response = client.newCall(request).execute()) {
-                if (!response.isSuccessful()) {
-                    return false;
-                }
-            }
-            // Test Gemini connection
-            return geminiService.testConnection();
-        } catch (Exception e) {
-            System.err.println("OpenRouter or Gemini connection test failed: " + e.getMessage());
+        Request request = new Request.Builder()
+                .url(OPENROUTER_GENERATION_ENDPOINT)
+                .header("Authorization", "Bearer " + openRouterApiKey)
+                .post(RequestBody.create("", MediaType.get("application/json")))
+                .build();
+        try (Response response = client.newCall(request).execute()) {
+            return response.isSuccessful();
+        } catch (IOException e) {
             return false;
         }
     }
 
     private String getLanguageFromFileName(String fileName) {
         if (fileName.endsWith(".java")) return "Java";
-        if (fileName.endsWith(".kt")) return "Kotlin";
         if (fileName.endsWith(".py")) return "Python";
         if (fileName.endsWith(".js")) return "JavaScript";
-        if (fileName.endsWith(".ts")) return "TypeScript";
-        if (fileName.endsWith(".c") || fileName.endsWith(".cpp") || fileName.endsWith(".h")) return "C/C++";
-        if (fileName.endsWith(".cs")) return "C#";
-        if (fileName.endsWith(".go")) return "Go";
-        if (fileName.endsWith(".rs")) return "Rust";
-        if (fileName.endsWith(".php")) return "PHP";
-        if (fileName.endsWith(".rb")) return "Ruby";
-        if (fileName.endsWith(".scala")) return "Scala";
-        if (fileName.endsWith(".groovy")) return "Groovy";
-        if (fileName.endsWith(".xml")) return "XML";
-        if (fileName.endsWith(".json")) return "JSON";
-        return "code";
+        return "Unknown";
     }
 }

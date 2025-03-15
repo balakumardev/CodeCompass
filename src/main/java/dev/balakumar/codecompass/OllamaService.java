@@ -4,6 +4,7 @@ import okhttp3.*;
 import com.google.gson.*;
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 public class OllamaService implements AIService {
@@ -25,10 +26,12 @@ public class OllamaService implements AIService {
         jsonRequest.addProperty("model", EMBEDDING_MODEL);
         jsonRequest.addProperty("prompt", "Represent this code for retrieval: " + truncatedText);
         String jsonRequestString = gson.toJson(jsonRequest);
+
         Request request = new Request.Builder()
                 .url(OLLAMA_EMBEDDING_ENDPOINT)
                 .post(RequestBody.create(jsonRequestString, MediaType.get("application/json")))
                 .build();
+
         try (Response response = client.newCall(request).execute()) {
             if (!response.isSuccessful()) {
                 String errorBody = response.body() != null ? response.body().string() : "";
@@ -40,6 +43,7 @@ public class OllamaService implements AIService {
             if (embeddingArray == null) {
                 throw new IOException("No embedding found in response: " + jsonResponse);
             }
+
             float[] embedding = new float[embeddingArray.size()];
             for (int i = 0; i < embeddingArray.size(); i++) {
                 embedding[i] = embeddingArray.get(i).getAsFloat();
@@ -57,15 +61,15 @@ public class OllamaService implements AIService {
         String truncatedCode = codeContent.length() > 8000 ? codeContent.substring(0, 8000) + "..." : codeContent;
         JsonObject jsonRequest = new JsonObject();
         jsonRequest.addProperty("model", GENERATION_MODEL);
-        jsonRequest.addProperty("prompt", "Generate a concise summary (max 3 sentences) of this "
-                + getLanguageFromFileName(fileName)
-                + " file. Include the main classes, methods, and functionality:\n\n" + truncatedCode);
+        jsonRequest.addProperty("prompt", "Generate a concise summary (max 3 sentences) of this " + getLanguageFromFileName(fileName) + " file. Include the main classes, methods, and functionality:\n\n" + truncatedCode);
         jsonRequest.addProperty("stream", false);
         String jsonRequestString = gson.toJson(jsonRequest);
+
         Request request = new Request.Builder()
                 .url(OLLAMA_GENERATION_ENDPOINT)
                 .post(RequestBody.create(jsonRequestString, MediaType.get("application/json")))
                 .build();
+
         try (Response response = client.newCall(request).execute()) {
             if (!response.isSuccessful()) {
                 String errorBody = response.body()!= null ? response.body().string() : "";
@@ -88,25 +92,29 @@ public class OllamaService implements AIService {
         if (results.isEmpty()) {
             return "No matching files found for query: " + query;
         }
+
         StringBuilder contextBuilder = new StringBuilder();
         contextBuilder.append("Query: ").append(query).append("\n\n");
         contextBuilder.append("Top matching files:\n\n");
+
         for (int i = 0; i < Math.min(3, results.size()); i++) {
             CodeSearchResult result = results.get(i);
             contextBuilder.append("File: ").append(result.getFilePath()).append("\n");
             contextBuilder.append("Summary: ").append(result.getSummary()).append("\n");
             contextBuilder.append("Similarity: ").append(String.format("%.2f", result.getSimilarity())).append("\n\n");
         }
+
         JsonObject jsonRequest = new JsonObject();
         jsonRequest.addProperty("model", GENERATION_MODEL);
-        jsonRequest.addProperty("prompt", "Based on the user query and the matching files, provide a brief explanation of which files are most relevant and why. Focus on functionality:\n\n"
-                + contextBuilder.toString());
+        jsonRequest.addProperty("prompt", "Based on the user query and the matching files, provide a brief explanation of which files are most relevant and why. Focus on functionality:\n\n" + contextBuilder.toString());
         jsonRequest.addProperty("stream", false);
         String jsonRequestString = gson.toJson(jsonRequest);
+
         Request request = new Request.Builder()
                 .url(OLLAMA_GENERATION_ENDPOINT)
                 .post(RequestBody.create(jsonRequestString, MediaType.get("application/json")))
                 .build();
+
         try (Response response = client.newCall(request).execute()) {
             if (!response.isSuccessful()) {
                 String errorBody = response.body()!= null ? response.body().string() : "";
@@ -120,12 +128,67 @@ public class OllamaService implements AIService {
     }
 
     @Override
+    public String askQuestion(String question, List<CodeSearchResult> relevantFiles) throws IOException {
+        StringBuilder prompt = new StringBuilder();
+        prompt.append("You are a code assistant. Answer the following question about the codebase using only the provided file contents.\n\n");
+        prompt.append("Question: ").append(question).append("\n\n");
+
+        if (relevantFiles.isEmpty()) {
+            prompt.append("No relevant files found in the codebase. Please suggest what the user might be looking for.");
+        } else {
+            prompt.append("Here are the relevant files from the codebase:\n\n");
+
+            for (int i = 0; i < Math.min(3, relevantFiles.size()); i++) {
+                CodeSearchResult file = relevantFiles.get(i);
+                prompt.append("FILE ").append(i+1).append(": ").append(file.getFilePath()).append("\n");
+
+                // Use content if available
+                if (file.getContent() != null && !file.getContent().isEmpty()) {
+                    String content = file.getContent();
+                    if (content.length() > 4000) {
+                        content = content.substring(0, 4000) + "\n// ... [content truncated] ...";
+                    }
+                    prompt.append("```\n").append(content).append("\n```\n\n");
+                } else {
+                    prompt.append("Summary: ").append(file.getSummary()).append("\n\n");
+                }
+            }
+
+            prompt.append("Based on these files, please answer the question. Include code snippets in your explanation when relevant.");
+        }
+
+        JsonObject jsonRequest = new JsonObject();
+        jsonRequest.addProperty("model", GENERATION_MODEL);
+        jsonRequest.addProperty("prompt", prompt.toString());
+        jsonRequest.addProperty("stream", false);
+        jsonRequest.addProperty("temperature", 0.2);
+        String jsonRequestString = gson.toJson(jsonRequest);
+
+        Request request = new Request.Builder()
+                .url(OLLAMA_GENERATION_ENDPOINT)
+                .post(RequestBody.create(jsonRequestString, MediaType.get("application/json")))
+                .build();
+
+        try (Response response = client.newCall(request).execute()) {
+            if (!response.isSuccessful()) {
+                String errorBody = response.body()!= null ? response.body().string() : "";
+                throw new IOException("Unexpected code " + response + ": " + errorBody);
+            }
+            JsonObject jsonResponse = gson.fromJson(response.body().charStream(), JsonObject.class);
+            return jsonResponse.get("response").getAsString();
+        } catch (Exception e) {
+            return "Failed to generate answer: " + e.getMessage();
+        }
+    }
+
+    @Override
     public boolean testConnection() {
         try {
             JsonObject jsonRequest = new JsonObject();
             jsonRequest.addProperty("model", EMBEDDING_MODEL);
             jsonRequest.addProperty("prompt", "test");
             String jsonRequestString = gson.toJson(jsonRequest);
+
             Request request = new Request.Builder()
                     .url(OLLAMA_EMBEDDING_ENDPOINT)
                     .post(RequestBody.create(jsonRequestString, MediaType.get("application/json")))

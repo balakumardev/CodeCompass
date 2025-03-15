@@ -41,8 +41,8 @@ patchPluginXml {
     sinceBuild = '231'
     untilBuild = '243.*'
     changeNotes = """
-        Enhanced CodeMapper with Qdrant vector search capabilities,
-        JSON parsing fixes (ensuring 'vectors_count' is checked for null),
-        and direct Google Gemini integration for both embedding and text generation.
+        Enhanced CodeMapper with Qdrant vector search capabilities, optimized vector storage, 
+        and added a new "Ask Questions About Code" feature that allows users to ask natural language 
+        questions about their codebase and get AI-powered answers.
     """
 }

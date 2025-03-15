@@ -14,6 +14,7 @@ import org.jetbrains.annotations.Nullable;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
+import java.awt.datatransfer.StringSelection;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.Collections;
@@ -28,6 +29,8 @@ public class EnhancedSearchDialog extends DialogWrapper {
     private final Project project;
     private JLabel statusLabel;
     private String lastQuery = "";
+    private List<CodeSearchResult> currentResults = Collections.emptyList();
+    private JButton copyButton;
 
     public EnhancedSearchDialog(Project project) {
         super(project);
@@ -43,18 +46,29 @@ public class EnhancedSearchDialog extends DialogWrapper {
         JPanel panel = new JPanel(new BorderLayout(10, 10));
         panel.setPreferredSize(new Dimension(900, 700));
         panel.setBorder(new EmptyBorder(10, 10, 10, 10));
-        JPanel searchPanel = new JPanel(new BorderLayout(5, 0));
+
+        // Top panel with search field and buttons
+        JPanel topPanel = new JPanel(new BorderLayout(5, 0));
         searchField = new JTextField();
         searchField.addActionListener(e -> performSearch());
+        topPanel.add(searchField, BorderLayout.CENTER);
+
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
         JButton searchButton = new JButton("Search");
         searchButton.addActionListener(e -> performSearch());
+        buttonPanel.add(searchButton);
+
+        copyButton = new JButton("Copy Paths");
+        copyButton.setEnabled(false);
+        copyButton.addActionListener(e -> copyPathsToClipboard());
+        buttonPanel.add(copyButton);
+
         JButton reindexButton = new JButton("Reindex");
         reindexButton.addActionListener(e -> reindexProject());
-        searchPanel.add(searchField, BorderLayout.CENTER);
-        searchPanel.add(searchButton, BorderLayout.EAST);
-        JPanel topPanel = new JPanel(new BorderLayout(5, 0));
-        topPanel.add(searchPanel, BorderLayout.CENTER);
-        topPanel.add(reindexButton, BorderLayout.EAST);
+        buttonPanel.add(reindexButton);
+
+        topPanel.add(buttonPanel, BorderLayout.EAST);
+
         JPanel contentPanel = new JPanel(new BorderLayout(10, 10));
         resultList = new JBList<>();
         resultList.setCellRenderer(new DefaultListCellRenderer() {
@@ -68,6 +82,7 @@ public class EnhancedSearchDialog extends DialogWrapper {
                 }
                 return super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
             }
+
             private String getDisplayPath(String path) {
                 String basePath = project.getBasePath();
                 if (basePath != null && path.startsWith(basePath)) {
@@ -110,6 +125,7 @@ public class EnhancedSearchDialog extends DialogWrapper {
         JScrollPane resultsScrollPane = new JScrollPane(resultList);
         resultsScrollPane.setBorder(BorderFactory.createTitledBorder(BorderFactory.createEtchedBorder(), "Results"));
         resultsScrollPane.setPreferredSize(new Dimension(300, 400));
+
         JPanel detailsPanel = new JPanel(new BorderLayout(0, 10));
         summaryArea = new JTextArea();
         summaryArea.setEditable(false);
@@ -118,6 +134,7 @@ public class EnhancedSearchDialog extends DialogWrapper {
         summaryArea.setRows(8);
         JScrollPane summaryScrollPane = new JScrollPane(summaryArea);
         summaryScrollPane.setBorder(BorderFactory.createTitledBorder(BorderFactory.createEtchedBorder(), "File Summary"));
+
         contextArea = new JTextArea();
         contextArea.setEditable(false);
         contextArea.setLineWrap(true);
@@ -125,11 +142,14 @@ public class EnhancedSearchDialog extends DialogWrapper {
         contextArea.setRows(12);
         JScrollPane contextScrollPane = new JScrollPane(contextArea);
         contextScrollPane.setBorder(BorderFactory.createTitledBorder(BorderFactory.createEtchedBorder(), "Search Context"));
+
         detailsPanel.add(summaryScrollPane, BorderLayout.NORTH);
         detailsPanel.add(contextScrollPane, BorderLayout.CENTER);
+
         JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, resultsScrollPane, detailsPanel);
         splitPane.setResizeWeight(0.3);
         contentPanel.add(splitPane, BorderLayout.CENTER);
+
         panel.add(topPanel, BorderLayout.NORTH);
         panel.add(contentPanel, BorderLayout.CENTER);
         statusLabel = new JLabel("Ready to search. Indexed " + indexer.getDocumentCount() + " files.");
@@ -146,7 +166,9 @@ public class EnhancedSearchDialog extends DialogWrapper {
 
     private void performSearch() {
         String query = searchField.getText().trim();
-        if (query.isEmpty()) { return; }
+        if (query.isEmpty()) {
+            return;
+        }
         lastQuery = query;
         JRootPane rootPane = SwingUtilities.getRootPane(this.getContentPane());
         if (rootPane != null) {
@@ -155,6 +177,7 @@ public class EnhancedSearchDialog extends DialogWrapper {
         ProgressManager.getInstance().run(new Task.Backgroundable(project, "Searching...") {
             private List<CodeSearchResult> results;
             private String searchContext;
+
             @Override
             public void run(@NotNull ProgressIndicator indicator) {
                 indicator.setIndeterminate(true);
@@ -171,9 +194,12 @@ public class EnhancedSearchDialog extends DialogWrapper {
                     e.printStackTrace();
                 }
             }
+
             @Override
             public void onSuccess() {
+                currentResults = results;
                 resultList.setListData(results.toArray(new CodeSearchResult[0]));
+                copyButton.setEnabled(!results.isEmpty());
                 contextArea.setText(searchContext);
                 statusLabel.setText("Found " + results.size() + " results out of " + indexer.getDocumentCount() + " indexed files");
                 JRootPane rootPane = SwingUtilities.getRootPane(getContentPane());
@@ -181,6 +207,7 @@ public class EnhancedSearchDialog extends DialogWrapper {
                     rootPane.setCursor(Cursor.getDefaultCursor());
                 }
             }
+
             @Override
             public void onFinished() {
                 JRootPane rootPane = SwingUtilities.getRootPane(getContentPane());
@@ -189,6 +216,19 @@ public class EnhancedSearchDialog extends DialogWrapper {
                 }
             }
         });
+    }
+
+    private void copyPathsToClipboard() {
+        if (currentResults.isEmpty()) {
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (CodeSearchResult result : currentResults) {
+            sb.append(result.getFilePath()).append("\n");
+        }
+        String paths = sb.toString();
+        Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(paths), null);
+        statusLabel.setText("Copied " + currentResults.size() + " file paths to clipboard");
     }
 
     private void reindexProject() {

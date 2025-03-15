@@ -4,10 +4,8 @@
     <id>dev.balakumar.codecompass</id>
     <version>1.0.0</version>
     <vendor email="mail@balakumar.dev" url="https://balakumar.dev">Bala Kumar</vendor>
-
     <description>
-        A plugin that indexes project files with AI embeddings,
-        then provides a search UI for semantic code search.
+        A plugin that indexes project files with AI embeddings, then provides a search UI for semantic code search and question answering.
     </description>
 
     <!-- The IntelliJ versions this plugin can load in -->
@@ -20,13 +18,17 @@
         <projectConfigurable instance="dev.balakumar.codecompass.CodeMapperSettings" displayName="CodeMapper"/>
     </extensions>
 
-    <!-- Actions: We only need the Search Action to appear in the Tools menu -->
+    <!-- Actions: We need both Search and Ask Question actions -->
     <actions>
-        <action
-                id="com.codemapper.searchAction"
-                class="dev.balakumar.codecompass.SearchAction"
+        <action id="com.codemapper.searchAction" class="dev.balakumar.codecompass.SearchAction"
                 text="Search with CodeMapper"
                 description="Embeds and searches project code files using AI embeddings">
+            <add-to-group group-id="ToolsMenu" anchor="last" />
+        </action>
+
+        <action id="com.codemapper.questionAction" class="dev.balakumar.codecompass.QuestionAction"
+                text="Ask Questions About Code"
+                description="Ask questions about your codebase using AI">
             <add-to-group group-id="ToolsMenu" anchor="last" />
         </action>
     </actions>
