@@ -16,19 +16,31 @@
         <postStartupActivity implementation="dev.balakumar.codecompass.StartupIndexer"/>
         <projectService serviceImplementation="dev.balakumar.codecompass.CodeMapperSettingsState"/>
         <projectConfigurable instance="dev.balakumar.codecompass.CodeMapperSettings" displayName="CodeMapper"/>
+
+        <!-- Register the chat tool window -->
+        <toolWindow id="CodeCompass Chat"
+                    secondary="true"
+                    icon="AllIcons.General.QuestionDialog"
+                    anchor="right"
+                    factoryClass="dev.balakumar.codecompass.ChatToolWindowFactory"/>
+
+        <!-- Notification group -->
+        <notificationGroup id="CodeCompass" displayType="BALLOON" />
     </extensions>
 
     <!-- Actions: We need both Search and Ask Question actions -->
     <actions>
-        <action id="com.codemapper.searchAction" class="dev.balakumar.codecompass.SearchAction"
-                text="Search with CodeMapper"
+        <action id="com.codemapper.searchAction"
+                class="dev.balakumar.codecompass.SearchAction"
+                text="Search with CodeCompass"
                 description="Embeds and searches project code files using AI embeddings">
             <add-to-group group-id="ToolsMenu" anchor="last" />
         </action>
 
-        <action id="com.codemapper.questionAction" class="dev.balakumar.codecompass.QuestionAction"
-                text="Ask Questions About Code"
-                description="Ask questions about your codebase using AI">
+        <action id="com.codemapper.chatAction"
+                class="dev.balakumar.codecompass.ChatAction"
+                text="Open CodeCompass Chat"
+                description="Open the CodeCompass chat window to ask questions about your code">
             <add-to-group group-id="ToolsMenu" anchor="last" />
         </action>
     </actions>

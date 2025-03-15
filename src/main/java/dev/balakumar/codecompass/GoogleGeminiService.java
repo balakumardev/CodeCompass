@@ -18,7 +18,7 @@ public class GoogleGeminiService implements AIService {
     private final Gson gson = new Gson();
     private int embeddingDimension = 768; // Default value (will update based on response)
     // API key (set via -DgoogleGemini.apiKey=YOUR_API_KEY)
-    private final String apiKey = System.getProperty("googleGemini.apiKey", "a");
+    private final String apiKey = System.getProperty("googleGemini.apiKey", "");
 
     @Override
     public float[] getEmbedding(String text) throws IOException {

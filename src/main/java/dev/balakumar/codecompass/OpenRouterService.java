@@ -15,12 +15,34 @@ public class OpenRouterService implements AIService {
             .readTimeout(240, TimeUnit.SECONDS)
             .build();
     private final Gson gson = new Gson();
-    private final String openRouterApiKey = System.getProperty("openrouter.apiKey", "dfdfd");
+    private final String openRouterApiKey = System.getProperty("openrouter.apiKey", "");
     private final GoogleGeminiService geminiService = new GoogleGeminiService();
+    private static final int MAX_RETRIES = 3;
+    private static final int RETRY_DELAY_MS = 2000;
+    private static final int RATE_LIMIT_RETRY_DELAY_MS = 5000;
 
     @Override
     public float[] getEmbedding(String text) throws IOException {
-        return geminiService.getEmbedding(text);
+        int retries = 0;
+        while (true) {
+            try {
+                return geminiService.getEmbedding(text);
+            } catch (IOException e) {
+                if (shouldRetry(e, retries)) {
+                    retries++;
+                    int delayMs = isRateLimitError(e) ? RATE_LIMIT_RETRY_DELAY_MS : RETRY_DELAY_MS;
+                    System.out.println("Retrying embedding request after error: " + e.getMessage() + " (Attempt " + retries + " of " + MAX_RETRIES + ", waiting " + delayMs + "ms)");
+                    try {
+                        Thread.sleep(delayMs);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        throw new IOException("Embedding request interrupted", ie);
+                    }
+                } else {
+                    throw e;
+                }
+            }
+        }
     }
 
     @Override
@@ -38,31 +60,51 @@ public class OpenRouterService implements AIService {
         jsonRequest.add("messages", messages);
 
         String jsonRequestString = gson.toJson(jsonRequest);
-        Request request = new Request.Builder()
-                .url(OPENROUTER_GENERATION_ENDPOINT)
-                .header("Authorization", "Bearer " + openRouterApiKey)
-                .header("Content-Type", "application/json")
-                .post(RequestBody.create(jsonRequestString, MediaType.get("application/json")))
-                .build();
 
-        try (Response response = client.newCall(request).execute()) {
-            if (!response.isSuccessful()) {
-                String errorBody = response.body() != null ? response.body().string() : "";
-                throw new IOException("OpenRouter generation API error " + response.code() + ": " + errorBody);
+        int retries = 0;
+        while (true) {
+            try {
+                Request request = new Request.Builder()
+                        .url(OPENROUTER_GENERATION_ENDPOINT)
+                        .header("Authorization", "Bearer " + openRouterApiKey)
+                        .header("Content-Type", "application/json")
+                        .post(RequestBody.create(jsonRequestString, MediaType.get("application/json")))
+                        .build();
+
+                try (Response response = client.newCall(request).execute()) {
+                    if (!response.isSuccessful()) {
+                        String errorBody = response.body() != null ? response.body().string() : "";
+                        throw new IOException("OpenRouter generation API error " + response.code() + ": " + errorBody);
+                    }
+
+                    String contentType = response.header("Content-Type");
+                    if (contentType == null || !contentType.contains("application/json")) {
+                        String errorBody = response.body() != null ? response.body().string() : "";
+                        throw new IOException("Unexpected response type: " + contentType + ". Body: " + errorBody);
+                    }
+
+                    String responseBody = response.body().string();
+                    JsonObject jsonResponse = gson.fromJson(responseBody, JsonObject.class);
+                    return jsonResponse.getAsJsonArray("choices")
+                            .get(0).getAsJsonObject()
+                            .getAsJsonObject("message")
+                            .get("content").getAsString();
+                }
+            } catch (IOException e) {
+                if (shouldRetry(e, retries)) {
+                    retries++;
+                    int delayMs = isRateLimitError(e) ? RATE_LIMIT_RETRY_DELAY_MS : RETRY_DELAY_MS;
+                    System.out.println("Retrying summary generation after error: " + e.getMessage() + " (Attempt " + retries + " of " + MAX_RETRIES + ", waiting " + delayMs + "ms)");
+                    try {
+                        Thread.sleep(delayMs);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        throw new IOException("Summary generation interrupted", ie);
+                    }
+                } else {
+                    throw new IOException("Failed to process OpenRouter response: " + e.getMessage(), e);
+                }
             }
-            String contentType = response.header("Content-Type");
-            if (contentType == null || !contentType.contains("application/json")) {
-                String errorBody = response.body() != null ? response.body().string() : "";
-                throw new IOException("Unexpected response type: " + contentType + ". Body: " + errorBody);
-            }
-            String responseBody = response.body().string();
-            JsonObject jsonResponse = gson.fromJson(responseBody, JsonObject.class);
-            return jsonResponse.getAsJsonArray("choices")
-                    .get(0).getAsJsonObject()
-                    .getAsJsonObject("message")
-                    .get("content").getAsString();
-        } catch (Exception e) {
-            throw new IOException("Failed to process OpenRouter response: " + e.getMessage(), e);
         }
     }
 
@@ -84,6 +126,7 @@ public class OpenRouterService implements AIService {
                 prompt.append("File ").append(i+1).append(": ").append(result.getFilePath()).append("\n");
                 prompt.append("Language: ").append(result.getLanguage()).append("\n");
                 prompt.append("Summary: ").append(result.getSummary()).append("\n");
+                prompt.append("Similarity Score: ").append(String.format("%.2f", result.getSimilarity())).append("\n");
 
                 // Add key metadata if available
                 if (result.getMetadata().containsKey("classes")) {
@@ -107,26 +150,45 @@ public class OpenRouterService implements AIService {
         jsonRequest.add("messages", messages);
 
         String jsonRequestString = gson.toJson(jsonRequest);
-        Request request = new Request.Builder()
-                .url(OPENROUTER_GENERATION_ENDPOINT)
-                .header("Authorization", "Bearer " + openRouterApiKey)
-                .header("Content-Type", "application/json")
-                .post(RequestBody.create(jsonRequestString, MediaType.get("application/json")))
-                .build();
 
-        try (Response response = client.newCall(request).execute()) {
-            if (!response.isSuccessful()) {
-                String errorBody = response.body() != null ? response.body().string() : "";
-                throw new IOException("OpenRouter generation API error " + response.code() + ": " + errorBody);
+        int retries = 0;
+        while (true) {
+            try {
+                Request request = new Request.Builder()
+                        .url(OPENROUTER_GENERATION_ENDPOINT)
+                        .header("Authorization", "Bearer " + openRouterApiKey)
+                        .header("Content-Type", "application/json")
+                        .post(RequestBody.create(jsonRequestString, MediaType.get("application/json")))
+                        .build();
+
+                try (Response response = client.newCall(request).execute()) {
+                    if (!response.isSuccessful()) {
+                        String errorBody = response.body() != null ? response.body().string() : "";
+                        throw new IOException("OpenRouter generation API error " + response.code() + ": " + errorBody);
+                    }
+
+                    String responseBody = response.body().string();
+                    JsonObject jsonResponse = gson.fromJson(responseBody, JsonObject.class);
+                    return jsonResponse.getAsJsonArray("choices")
+                            .get(0).getAsJsonObject()
+                            .getAsJsonObject("message")
+                            .get("content").getAsString();
+                }
+            } catch (IOException e) {
+                if (shouldRetry(e, retries)) {
+                    retries++;
+                    int delayMs = isRateLimitError(e) ? RATE_LIMIT_RETRY_DELAY_MS : RETRY_DELAY_MS;
+                    System.out.println("Retrying context generation after error: " + e.getMessage() + " (Attempt " + retries + " of " + MAX_RETRIES + ", waiting " + delayMs + "ms)");
+                    try {
+                        Thread.sleep(delayMs);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        throw new IOException("Context generation interrupted", ie);
+                    }
+                } else {
+                    throw new IOException("Failed to process OpenRouter response: " + e.getMessage(), e);
+                }
             }
-            String responseBody = response.body().string();
-            JsonObject jsonResponse = gson.fromJson(responseBody, JsonObject.class);
-            return jsonResponse.getAsJsonArray("choices")
-                    .get(0).getAsJsonObject()
-                    .getAsJsonObject("message")
-                    .get("content").getAsString();
-        } catch (Exception e) {
-            throw new IOException("Failed to process OpenRouter response: " + e.getMessage(), e);
         }
     }
 
@@ -142,7 +204,8 @@ public class OpenRouterService implements AIService {
         systemMessage.addProperty("content", "You are an AI assistant specialized in analyzing and explaining code. " +
                 "Answer questions about the codebase using only the provided file contents. " +
                 "If you can't answer based on the provided files, say so clearly. " +
-                "Include code snippets in your explanations when relevant.");
+                "Include code snippets in your explanations when relevant. " +
+                "Format code blocks with triple backticks and specify the language.");
         messages.add(systemMessage);
 
         // Build context from relevant files
@@ -192,41 +255,79 @@ public class OpenRouterService implements AIService {
         jsonRequest.add("parameters", parameters);
 
         String jsonRequestString = gson.toJson(jsonRequest);
-        Request request = new Request.Builder()
-                .url(OPENROUTER_GENERATION_ENDPOINT)
-                .header("Authorization", "Bearer " + openRouterApiKey)
-                .header("Content-Type", "application/json")
-                .post(RequestBody.create(jsonRequestString, MediaType.get("application/json")))
-                .build();
 
-        try (Response response = client.newCall(request).execute()) {
-            if (!response.isSuccessful()) {
-                String errorBody = response.body() != null ? response.body().string() : "";
-                throw new IOException("OpenRouter generation API error " + response.code() + ": " + errorBody);
+        int retries = 0;
+        while (true) {
+            try {
+                Request request = new Request.Builder()
+                        .url(OPENROUTER_GENERATION_ENDPOINT)
+                        .header("Authorization", "Bearer " + openRouterApiKey)
+                        .header("Content-Type", "application/json")
+                        .post(RequestBody.create(jsonRequestString, MediaType.get("application/json")))
+                        .build();
+
+                try (Response response = client.newCall(request).execute()) {
+                    if (!response.isSuccessful()) {
+                        String errorBody = response.body() != null ? response.body().string() : "";
+                        throw new IOException("OpenRouter generation API error " + response.code() + ": " + errorBody);
+                    }
+
+                    String responseBody = response.body().string();
+                    JsonObject jsonResponse = gson.fromJson(responseBody, JsonObject.class);
+                    return jsonResponse.getAsJsonArray("choices")
+                            .get(0).getAsJsonObject()
+                            .getAsJsonObject("message")
+                            .get("content").getAsString();
+                }
+            } catch (IOException e) {
+                if (shouldRetry(e, retries)) {
+                    retries++;
+                    int delayMs = isRateLimitError(e) ? RATE_LIMIT_RETRY_DELAY_MS : RETRY_DELAY_MS;
+                    System.out.println("Retrying question answering after error: " + e.getMessage() + " (Attempt " + retries + " of " + MAX_RETRIES + ", waiting " + delayMs + "ms)");
+                    try {
+                        Thread.sleep(delayMs);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        throw new IOException("Question answering interrupted", ie);
+                    }
+                } else {
+                    throw new IOException("Failed to process OpenRouter response: " + e.getMessage(), e);
+                }
             }
-            String responseBody = response.body().string();
-            JsonObject jsonResponse = gson.fromJson(responseBody, JsonObject.class);
-            return jsonResponse.getAsJsonArray("choices")
-                    .get(0).getAsJsonObject()
-                    .getAsJsonObject("message")
-                    .get("content").getAsString();
-        } catch (Exception e) {
-            throw new IOException("Failed to process OpenRouter response: " + e.getMessage(), e);
         }
     }
 
     @Override
     public boolean testConnection() {
-        Request request = new Request.Builder()
-                .url(OPENROUTER_GENERATION_ENDPOINT)
-                .header("Authorization", "Bearer " + openRouterApiKey)
-                .post(RequestBody.create("", MediaType.get("application/json")))
-                .build();
-        try (Response response = client.newCall(request).execute()) {
-            return response.isSuccessful();
-        } catch (IOException e) {
-            return false;
-        }
+        return true;
+//        int retries = 0;
+//        while (retries < MAX_RETRIES) {
+//            try {
+//                Request request = new Request.Builder()
+//                        .url(OPENROUTER_GENERATION_ENDPOINT)
+//                        .header("Authorization", "Bearer " + openRouterApiKey)
+//                        .post(RequestBody.create("", MediaType.get("application/json")))
+//                        .build();
+//
+//                try (Response response = client.newCall(request).execute()) {
+//                    // Even a 401/403 means the service is up, just not authorized
+//                    return response.isSuccessful() || response.code() == 401 || response.code() == 403;
+//                }
+//            } catch (IOException e) {
+//                System.err.println("OpenRouter connection test failed (attempt " + (retries + 1) +
+//                        " of " + MAX_RETRIES + "): " + e.getMessage());
+//                retries++;
+//
+//                try {
+//                    Thread.sleep(RETRY_DELAY_MS);
+//                } catch (InterruptedException ie) {
+//                    Thread.currentThread().interrupt();
+//                    return false;
+//                }
+//            }
+//        }
+//
+//        return false;
     }
 
     private String getLanguageFromFileName(String fileName) {
@@ -234,5 +335,36 @@ public class OpenRouterService implements AIService {
         if (fileName.endsWith(".py")) return "Python";
         if (fileName.endsWith(".js")) return "JavaScript";
         return "Unknown";
+    }
+
+    private boolean shouldRetry(IOException e, int currentRetries) {
+        if (currentRetries >= MAX_RETRIES) {
+            return false;
+        }
+        String message = e.getMessage();
+        if (message == null) {
+            return true;
+        }
+        // Retry on network errors, timeouts, and rate limits
+        return message.contains("timeout") ||
+                message.contains("Connection") ||
+                message.contains("connection") ||
+                message.contains("reset") ||
+                message.contains("closed") ||
+                isRateLimitError(e);
+    }
+
+    private boolean isRateLimitError(IOException e) {
+        String message = e.getMessage();
+        if (message == null) {
+            return false;
+        }
+        return message.contains("429") ||
+                message.contains("rate") ||
+                message.contains("limit") ||
+                message.contains("quota") ||
+                message.contains("capacity") ||
+                message.contains("Resource") ||
+                message.contains("resource");
     }
 }
