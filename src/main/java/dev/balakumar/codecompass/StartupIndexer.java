@@ -13,6 +13,11 @@ public class StartupIndexer implements ProjectActivity {
     @Nullable
     @Override
     public Object execute(@NotNull Project project, @NotNull Continuation<? super Unit> continuation) {
+        CodeMapperSettingsState settings = CodeMapperSettingsState.getInstance(project);
+        if (!settings.enableStartupIndexing) {
+            System.out.println("Startup indexing is disabled.");
+            return Unit.INSTANCE;
+        }
         if (project == null || project.getBasePath() == null) {
             System.err.println("Cannot start indexing: project or project path is null");
             return Unit.INSTANCE;

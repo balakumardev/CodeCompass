@@ -31,6 +31,7 @@ public class VectorDBService {
         this.gson = new GsonBuilder().setPrettyPrinting().create();
         dbPath = Path.of(projectPath, ".codemapper");
         Files.createDirectories(dbPath);
+
         try {
             float[] testEmbedding = aiService.getEmbedding("test embedding");
             dimensions = testEmbedding.length;
@@ -42,10 +43,12 @@ public class VectorDBService {
                 throw new IOException("Failed to determine embedding dimension", e);
             }
         }
+
         if (!isQdrantRunning()) {
             System.err.println("Qdrant is not running. Please start Qdrant first.");
             throw new IOException("Qdrant server is not running");
         }
+
         initializeCollection();
         updateDocumentCount();
         System.out.println("VectorDBService initialized with " + documentCount.get() + " documents");
@@ -138,28 +141,34 @@ public class VectorDBService {
                     .get()
                     .build();
             try (Response response = client.newCall(request).execute()) {
-                if (response.isSuccessful()) {
-                    String responseBody = response.body().string();
-                    JsonObject jsonResponse = gson.fromJson(responseBody, JsonObject.class);
-                    JsonObject result = jsonResponse.getAsJsonObject("result");
-                    if (result != null && result.has("vectors_count") && !result.get("vectors_count").isJsonNull()) {
-                        // Here we assume that the response contains the field “vectors_count”
-                        // for document statistics; the collection configuration is stored elsewhere.
-                        // (This does not yield the vector size, so we check config if needed.)
-                        JsonObject config = result.getAsJsonObject("config");
-                        if (config != null) {
-                            JsonObject params = config.getAsJsonObject("params");
-                            if (params != null) {
-                                JsonObject vectors = params.getAsJsonObject("vectors");
-                                if (vectors != null && vectors.has("size") && !vectors.get("size").isJsonNull()) {
-                                    return vectors.get("size").getAsInt();
-                                }
-                            }
-                        }
-                    }
+                if (!response.isSuccessful()) {
+                    System.err.println("Failed to fetch collection info: " + response.code());
                     return -1;
                 }
-                return -1;
+                String responseBody = response.body().string();
+                System.out.println("Collection info response: " + responseBody);
+                JsonObject jsonResponse = gson.fromJson(responseBody, JsonObject.class);
+                JsonObject result = jsonResponse.getAsJsonObject("result");
+                if (result == null) {
+                    System.err.println("No 'result' field in response");
+                    return -1;
+                }
+                JsonObject config = result.getAsJsonObject("config");
+                if (config == null) {
+                    System.err.println("No 'config' field in response");
+                    return -1;
+                }
+                JsonObject params = config.getAsJsonObject("params");
+                if (params == null) {
+                    System.err.println("No 'params' field in response");
+                    return -1;
+                }
+                JsonObject vectors = params.getAsJsonObject("vectors");
+                if (vectors == null || !vectors.has("size")) {
+                    System.err.println("No valid 'vectors.size' field in response");
+                    return -1;
+                }
+                return vectors.get("size").getAsInt();
             }
         } catch (Exception e) {
             System.err.println("Error getting collection dimension: " + e.getMessage());
@@ -225,11 +234,11 @@ public class VectorDBService {
                         String responseBody = response.body().string();
                         JsonObject jsonResponse = gson.fromJson(responseBody, JsonObject.class);
                         JsonObject result = jsonResponse.getAsJsonObject("result");
-                        if (result != null && result.has("vectors_count") && !result.get("vectors_count").isJsonNull()) {
-                            int count = result.get("vectors_count").getAsInt();
+                        if (result != null && result.has("points_count") && !result.get("points_count").isJsonNull()) {
+                            int count = result.get("points_count").getAsInt();
                             documentCount.set(count);
                         } else {
-                            System.err.println("vectors_count not found in collection result");
+                            System.err.println("points_count not found in collection result");
                             documentCount.set(0);
                         }
                     } else {
@@ -259,7 +268,9 @@ public class VectorDBService {
             JsonObject pointRequest = new JsonObject();
             pointRequest.addProperty("id", pointId);
             JsonArray vector = new JsonArray();
-            for (float value : embedding) { vector.add(value); }
+            for (float value : embedding) {
+                vector.add(value);
+            }
             pointRequest.add("vector", vector);
             JsonObject payload = new JsonObject();
             payload.addProperty("filePath", filePath);
@@ -306,7 +317,9 @@ public class VectorDBService {
             }
             JsonObject searchRequest = new JsonObject();
             JsonArray vector = new JsonArray();
-            for (float value : queryEmbedding) { vector.add(value); }
+            for (float value : queryEmbedding) {
+                vector.add(value);
+            }
             searchRequest.add("vector", vector);
             searchRequest.addProperty("limit", limit);
             searchRequest.addProperty("with_payload", true);

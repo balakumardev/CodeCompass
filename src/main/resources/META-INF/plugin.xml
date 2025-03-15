@@ -6,16 +6,18 @@
     <vendor email="mail@balakumar.dev" url="https://balakumar.dev">Bala Kumar</vendor>
 
     <description>
-        A plugin that indexes project files with AI embeddings (via OllamaService),
+        A plugin that indexes project files with AI embeddings,
         then provides a search UI for semantic code search.
     </description>
 
     <!-- The IntelliJ versions this plugin can load in -->
     <idea-version since-build="231" until-build="243.*" />
 
-    <!-- Register the startup indexer -->
+    <!-- Register the startup indexer and settings -->
     <extensions defaultExtensionNs="com.intellij">
         <postStartupActivity implementation="dev.balakumar.codecompass.StartupIndexer"/>
+        <projectService serviceImplementation="dev.balakumar.codecompass.CodeMapperSettingsState"/>
+        <projectConfigurable instance="dev.balakumar.codecompass.CodeMapperSettings" displayName="CodeMapper"/>
     </extensions>
 
     <!-- Actions: We only need the Search Action to appear in the Tools menu -->

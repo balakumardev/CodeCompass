@@ -13,13 +13,13 @@ public class SimpleIndexer {
     private VectorDBService vectorDBService;
     private Project project;
 
-    public SimpleIndexer() {
-        this.aiService = ProviderSettings.getAIService();
-    }
+//    public SimpleIndexer() {
+//        this.aiService = ProviderSettings.getAIService();
+//    }
 
     public SimpleIndexer(Project project) {
-        this();
         this.project = project;
+        this.aiService = ProviderSettings.getAIService(project);
         try {
             this.vectorDBService = new VectorDBService(project.getBasePath(), aiService);
         } catch (IOException e) {
