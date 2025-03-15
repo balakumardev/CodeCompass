@@ -17,25 +17,11 @@ public class CodeSearchResult implements Comparable<CodeSearchResult> {
         this.metadata = metadata;
     }
 
-    public String getId() {
-        return id;
-    }
-
-    public String getFilePath() {
-        return filePath;
-    }
-
-    public String getSummary() {
-        return summary;
-    }
-
-    public float getSimilarity() {
-        return similarity;
-    }
-
-    public Map<String, String> getMetadata() {
-        return metadata;
-    }
+    public String getId() { return id; }
+    public String getFilePath() { return filePath; }
+    public String getSummary() { return summary; }
+    public float getSimilarity() { return similarity; }
+    public Map<String, String> getMetadata() { return metadata; }
 
     @Override
     public int compareTo(CodeSearchResult other) {

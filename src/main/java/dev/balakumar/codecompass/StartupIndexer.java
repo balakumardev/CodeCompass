@@ -17,21 +17,15 @@ public class StartupIndexer implements ProjectActivity {
             System.err.println("Cannot start indexing: project or project path is null");
             return Unit.INSTANCE;
         }
-
         new Task.Backgroundable(project, "Indexing with CodeMapper") {
             @Override
             public void run(@NotNull ProgressIndicator indicator) {
                 indicator.setText("Starting AI-based indexing...");
                 indicator.setIndeterminate(true);
-
                 try {
-                    // Clean up old index files to force fresh start
                     CleanupService.cleanupIndexFiles(project.getBasePath());
-
-                    // Create and run the indexer with the project
                     SimpleIndexer indexer = new SimpleIndexer(project);
                     indexer.indexProject(project, indicator);
-
                     indicator.setText("Indexing completed (CodeMapper).");
                 } catch (Exception e) {
                     indicator.setText("Error during indexing: " + e.getMessage());
@@ -39,8 +33,6 @@ public class StartupIndexer implements ProjectActivity {
                 }
             }
         }.queue();
-
         return Unit.INSTANCE;
     }
-
 }

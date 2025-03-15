@@ -21,11 +21,6 @@ intellij {
 dependencies {
     implementation 'com.squareup.okhttp3:okhttp:4.9.2'
     implementation 'com.google.code.gson:gson:2.10.1'
-
-    // For vector search
-    implementation 'com.github.jelmerk:hnswlib-core:1.1.0'
-
-    // For better text processing
     implementation 'org.apache.commons:commons-text:1.10.0'
 }
 
@@ -39,16 +34,15 @@ java {
 }
 
 runIde {
-    // Increase memory allocation
-    jvmArgs = ['-Xmx2048m', '-Xms512m']
-    // Add this to help diagnose crashes
-    jvmArgs += ['-XX:+HeapDumpOnOutOfMemoryError']
+    jvmArgs = ['-Xmx2048m', '-Xms512m', '-XX:+HeapDumpOnOutOfMemoryError']
 }
 
 patchPluginXml {
     sinceBuild = '231'
     untilBuild = '243.*'
     changeNotes = """
-      Enhanced CodeMapper with vector search capabilities.
-      """
+        Enhanced CodeMapper with Qdrant vector search capabilities,
+        JSON parsing fixes (ensuring 'vectors_count' is checked for null),
+        and direct Google Gemini integration for both embedding and text generation.
+    """
 }
