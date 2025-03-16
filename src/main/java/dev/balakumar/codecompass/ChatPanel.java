@@ -484,13 +484,46 @@ public class ChatPanel extends SimpleToolWindowPanel {
                         // Get result limit from spinner
                         int limit = (Integer) resultLimitSpinner.getValue();
 
-                        // Search for relevant files with filters and higher similarity threshold
-                        indicator.setText("Searching for relevant files...");
-                        results = indexer.search(userMessage, limit, currentFilters, 0.60f); // Higher threshold
+                        // Determine if this is a follow-up question
+                        boolean isFollowUp = isFollowUpQuestion(userMessage, messageHistory);
+
+                        List<CodeSearchResult> searchResults;
+
+                        // If it's a follow-up and we have current results, use them first
+                        if (isFollowUp && !currentResults.isEmpty()) {
+                            indicator.setText("Using existing context for follow-up question...");
+                            searchResults = currentResults;
+                        } else {
+                            // Otherwise, search for new relevant files
+                            indicator.setText("Searching for relevant files...");
+                            searchResults = indexer.search(userMessage, limit, currentFilters, 0.55f);
+                        }
+
+                        // If we didn't find anything and it's a follow-up, try a broader search
+                        if (searchResults.isEmpty() && isFollowUp) {
+                            indicator.setText("Broadening search for follow-up question...");
+                            searchResults = indexer.search(userMessage, limit, currentFilters, 0.5f); // Lower threshold
+                        }
+
+                        results = searchResults;
 
                         if (!results.isEmpty()) {
                             indicator.setText("Generating answer...");
-                            answer = aiService.askQuestion(userMessage, results);
+
+                            // Convert ChatMessage objects to Maps for the API
+                            List<Map<String, Object>> historyMaps = new ArrayList<>();
+                            for (ChatMessage msg : messageHistory) {
+                                // Only include the last few messages
+                                if (messageHistory.size() - messageHistory.indexOf(msg) <= 6) {
+                                    Map<String, Object> msgMap = new HashMap<>();
+                                    msgMap.put("message", msg.getMessage());
+                                    msgMap.put("isUser", msg.isUserMessage());
+                                    msgMap.put("timestamp", msg.getTimestamp());
+                                    historyMaps.add(msgMap);
+                                }
+                            }
+
+                            answer = aiService.askQuestionWithHistory(userMessage, results, historyMaps);
                             success = true;
                         } else {
                             answer = "I couldn't find any relevant files in the codebase for your question. Try rephrasing or asking about a different topic.";
@@ -520,7 +553,6 @@ public class ChatPanel extends SimpleToolWindowPanel {
                         }
                     }
                 }
-
                 if (!success && errorMessage == null) {
                     errorMessage = "Failed to generate answer after " + MAX_RETRIES + " attempts.";
                 }
@@ -530,17 +562,15 @@ public class ChatPanel extends SimpleToolWindowPanel {
             public void onSuccess() {
                 // Remove the placeholder message
                 messagesPanel.remove(aiMessagePanel);
-
                 if (success) {
                     addAIMessage(answer);
-
-                    // Update relevant files list
-                    currentResults = results;
-                    updateRelevantFilesList(results);
-
+                    // Update relevant files list only if we have results
+                    if (!results.isEmpty()) {
+                        currentResults = results;
+                        updateRelevantFilesList(results);
+                    }
                     // Update status
                     statusLabel.setText("Found " + results.size() + " relevant files out of " + indexer.getDocumentCount() + " indexed files");
-
                     // Show relevant files if we have results
                     if (!results.isEmpty() && !relevantFilesPanelExpanded) {
                         toggleRelevantFilesPanel();
@@ -548,7 +578,6 @@ public class ChatPanel extends SimpleToolWindowPanel {
                 } else {
                     addErrorMessage(errorMessage != null ? errorMessage : "An unknown error occurred while processing your question.");
                 }
-
                 isProcessing.set(false);
                 updateSendButton();
                 retryButton.setEnabled(true);
@@ -565,6 +594,53 @@ public class ChatPanel extends SimpleToolWindowPanel {
             }
         });
     }
+
+    /**
+     * Determines if the current question is likely a follow-up to previous conversation
+     */
+    private boolean isFollowUpQuestion(String question, List<ChatMessage> history) {
+        if (history.size() < 2) {
+            return false; // Need at least one previous exchange
+        }
+
+        // Check for pronouns and other follow-up indicators
+        String lowercaseQuestion = question.toLowerCase();
+        String[] followUpIndicators = {
+                "it", "this", "that", "they", "them", "these", "those",
+                "he", "she", "his", "her", "their", "its",
+                "what about", "how about", "and", "also", "too",
+                "can you", "could you", "would you", "will you"
+        };
+
+        for (String indicator : followUpIndicators) {
+            if (lowercaseQuestion.contains(indicator)) {
+                return true;
+            }
+        }
+
+        // Check if it's a very short question (likely follow-up)
+        if (question.split("\\s+").length <= 5) {
+            return true;
+        }
+
+        // Check if it doesn't contain any code-related keywords (less likely to be a new topic)
+        String[] codeKeywords = {
+                "class", "method", "function", "file", "code", "implement",
+                "java", "python", "javascript", "typescript", "c++", "c#", "go", "rust"
+        };
+
+        boolean hasCodeKeyword = false;
+        for (String keyword : codeKeywords) {
+            if (lowercaseQuestion.contains(keyword)) {
+                hasCodeKeyword = true;
+                break;
+            }
+        }
+
+        return !hasCodeKeyword;
+    }
+
+
 
     private void updateRelevantFilesList(List<CodeSearchResult> results) {
         // Update the file list model

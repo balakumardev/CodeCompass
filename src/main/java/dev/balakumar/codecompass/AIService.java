@@ -2,6 +2,7 @@ package dev.balakumar.codecompass;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 
 public interface AIService {
     /**
@@ -42,6 +43,17 @@ public interface AIService {
      * @throws IOException If the question answering fails
      */
     String askQuestion(String question, List<CodeSearchResult> relevantFiles) throws IOException;
+
+    /**
+     * Ask a question about the codebase using the provided relevant files and chat history
+     *
+     * @param question The question to ask
+     * @param relevantFiles The relevant files to use for answering the question
+     * @param chatHistory Previous messages in the conversation as a list of maps
+     * @return The answer to the question
+     * @throws IOException If the question answering fails
+     */
+    String askQuestionWithHistory(String question, List<CodeSearchResult> relevantFiles, List<Map<String, Object>> chatHistory) throws IOException;
 
     /**
      * Test the connection to the AI service
