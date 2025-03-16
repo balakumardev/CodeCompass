@@ -22,7 +22,6 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
 import org.jetbrains.annotations.NotNull;
-
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import javax.swing.text.*;
@@ -140,11 +139,14 @@ public class ChatPanel extends SimpleToolWindowPanel {
         sendButton = new JButton("Send", AllIcons.Actions.Execute);
         sendButton.setEnabled(false);
         sendButton.addActionListener(e -> sendMessage());
+
         clearButton = new JButton("Clear Chat", AllIcons.Actions.GC);
         clearButton.addActionListener(e -> clearChat());
+
         retryButton = new JButton("Retry", AllIcons.Actions.Refresh);
         retryButton.setEnabled(false);
         retryButton.addActionListener(e -> retryLastMessage());
+
         buttonsPanel.add(retryButton);
         buttonsPanel.add(clearButton);
         buttonsPanel.add(sendButton);
@@ -154,17 +156,29 @@ public class ChatPanel extends SimpleToolWindowPanel {
         inputPanel.add(inputScrollPane, BorderLayout.CENTER);
         inputPanel.add(buttonsPanel, BorderLayout.SOUTH);
 
-        // Status panel
-        statusPanel = new JPanel(new BorderLayout());
-        statusLabel = new JLabel("Initializing services...");
-        statusPanel.add(statusLabel, BorderLayout.WEST);
+        // Status panel with fixed layout to prevent overlapping
+        statusPanel = new JPanel(new GridBagLayout());
+        statusPanel.setBorder(JBUI.Borders.empty(5));
 
-        // Filter panel
-        JPanel filterPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        // Status label (left side)
+        statusLabel = new JLabel("Initializing services...");
+        GridBagConstraints labelConstraints = new GridBagConstraints();
+        labelConstraints.gridx = 0;
+        labelConstraints.gridy = 0;
+        labelConstraints.weightx = 0.7;
+        labelConstraints.fill = GridBagConstraints.HORIZONTAL;
+        labelConstraints.anchor = GridBagConstraints.WEST;
+        labelConstraints.insets = JBUI.insets(5, 10, 5, 10);
+        statusPanel.add(statusLabel, labelConstraints);
+
+        // Filter panel (right side)
+        JPanel filterPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
+
+        // Language filter
         filterPanel.add(new JBLabel("Language:"));
         languageFilterComboBox = new ComboBox<>();
+        languageFilterComboBox.setPreferredSize(new Dimension(120, languageFilterComboBox.getPreferredSize().height));
         languageFilterComboBox.addItem("All Languages");
-        // We'll populate languages in the background
         languageFilterComboBox.addActionListener(e -> {
             String selectedLanguage = (String) languageFilterComboBox.getSelectedItem();
             if ("All Languages".equals(selectedLanguage)) {
@@ -174,11 +188,22 @@ public class ChatPanel extends SimpleToolWindowPanel {
             }
         });
         filterPanel.add(languageFilterComboBox);
+
+        // Results limit
         filterPanel.add(new JBLabel("Max Results:"));
         SpinnerNumberModel spinnerModel = new SpinnerNumberModel(5, 1, 20, 1);
         resultLimitSpinner = new JSpinner(spinnerModel);
+        resultLimitSpinner.setPreferredSize(new Dimension(60, resultLimitSpinner.getPreferredSize().height));
         filterPanel.add(resultLimitSpinner);
-        statusPanel.add(filterPanel, BorderLayout.EAST);
+
+        // Add filter panel to status panel
+        GridBagConstraints filterConstraints = new GridBagConstraints();
+        filterConstraints.gridx = 1;
+        filterConstraints.gridy = 0;
+        filterConstraints.weightx = 0.3;
+        filterConstraints.fill = GridBagConstraints.HORIZONTAL;
+        filterConstraints.anchor = GridBagConstraints.EAST;
+        statusPanel.add(filterPanel, filterConstraints);
 
         // Relevant files panel (collapsible at the bottom)
         relevantFilesPanel = new JPanel(new BorderLayout());
@@ -294,10 +319,12 @@ public class ChatPanel extends SimpleToolWindowPanel {
                             .connectTimeout(5, TimeUnit.SECONDS)
                             .readTimeout(5, TimeUnit.SECONDS)
                             .build();
+
                     Request request = new Request.Builder()
                             .url("http://localhost:6333/healthz")
                             .get()
                             .build();
+
                     try (Response response = httpClient.newCall(request).execute()) {
                         qdrantRunning = response.isSuccessful();
                         if (qdrantRunning) {
@@ -394,6 +421,7 @@ public class ChatPanel extends SimpleToolWindowPanel {
                     initialized.set(true);
                     updateSendButton();
                 });
+
             } catch (Exception e) {
                 System.err.println("Error during initialization: " + e.getMessage());
                 e.printStackTrace();
@@ -405,6 +433,7 @@ public class ChatPanel extends SimpleToolWindowPanel {
                 });
             }
         });
+
         initThread.setDaemon(true);
         initThread.start();
 
@@ -422,8 +451,6 @@ public class ChatPanel extends SimpleToolWindowPanel {
         timeoutTimer.setRepeats(false);
         timeoutTimer.start();
     }
-
-
 
     // This method is called after the panel is added to the UI
     public void initializeInBackground() {
@@ -479,6 +506,7 @@ public class ChatPanel extends SimpleToolWindowPanel {
             @Override
             public void run(@NotNull ProgressIndicator indicator) {
                 indicator.setIndeterminate(true);
+
                 while (retryCount < MAX_RETRIES && !success) {
                     try {
                         // Get result limit from spinner
@@ -486,7 +514,6 @@ public class ChatPanel extends SimpleToolWindowPanel {
 
                         // Determine if this is a follow-up question
                         boolean isFollowUp = isFollowUpQuestion(userMessage, messageHistory);
-
                         List<CodeSearchResult> searchResults;
 
                         // If it's a follow-up and we have current results, use them first
@@ -531,8 +558,7 @@ public class ChatPanel extends SimpleToolWindowPanel {
                         }
                     } catch (IOException e) {
                         retryCount++;
-                        if (e.getMessage().contains("429") || e.getMessage().contains("resource") ||
-                                e.getMessage().contains("limit") || e.getMessage().contains("quota")) {
+                        if (e.getMessage().contains("429") || e.getMessage().contains("resource") || e.getMessage().contains("limit") || e.getMessage().contains("quota")) {
                             // Rate limit or resource exhaustion
                             indicator.setText("Rate limited. Retrying in 5 seconds... (" + retryCount + "/" + MAX_RETRIES + ")");
                             try {
@@ -553,6 +579,7 @@ public class ChatPanel extends SimpleToolWindowPanel {
                         }
                     }
                 }
+
                 if (!success && errorMessage == null) {
                     errorMessage = "Failed to generate answer after " + MAX_RETRIES + " attempts.";
                 }
@@ -562,15 +589,19 @@ public class ChatPanel extends SimpleToolWindowPanel {
             public void onSuccess() {
                 // Remove the placeholder message
                 messagesPanel.remove(aiMessagePanel);
+
                 if (success) {
                     addAIMessage(answer);
+
                     // Update relevant files list only if we have results
                     if (!results.isEmpty()) {
                         currentResults = results;
                         updateRelevantFilesList(results);
                     }
+
                     // Update status
                     statusLabel.setText("Found " + results.size() + " relevant files out of " + indexer.getDocumentCount() + " indexed files");
+
                     // Show relevant files if we have results
                     if (!results.isEmpty() && !relevantFilesPanelExpanded) {
                         toggleRelevantFilesPanel();
@@ -578,6 +609,7 @@ public class ChatPanel extends SimpleToolWindowPanel {
                 } else {
                     addErrorMessage(errorMessage != null ? errorMessage : "An unknown error occurred while processing your question.");
                 }
+
                 isProcessing.set(false);
                 updateSendButton();
                 retryButton.setEnabled(true);
@@ -606,10 +638,8 @@ public class ChatPanel extends SimpleToolWindowPanel {
         // Check for pronouns and other follow-up indicators
         String lowercaseQuestion = question.toLowerCase();
         String[] followUpIndicators = {
-                "it", "this", "that", "they", "them", "these", "those",
-                "he", "she", "his", "her", "their", "its",
-                "what about", "how about", "and", "also", "too",
-                "can you", "could you", "would you", "will you"
+                "it", "this", "that", "they", "them", "these", "those", "he", "she", "his", "her", "their", "its",
+                "what about", "how about", "and", "also", "too", "can you", "could you", "would you", "will you"
         };
 
         for (String indicator : followUpIndicators) {
@@ -625,8 +655,8 @@ public class ChatPanel extends SimpleToolWindowPanel {
 
         // Check if it doesn't contain any code-related keywords (less likely to be a new topic)
         String[] codeKeywords = {
-                "class", "method", "function", "file", "code", "implement",
-                "java", "python", "javascript", "typescript", "c++", "c#", "go", "rust"
+                "class", "method", "function", "file", "code", "implement", "java", "python", "javascript",
+                "typescript", "c++", "c#", "go", "rust"
         };
 
         boolean hasCodeKeyword = false;
@@ -639,8 +669,6 @@ public class ChatPanel extends SimpleToolWindowPanel {
 
         return !hasCodeKeyword;
     }
-
-
 
     private void updateRelevantFilesList(List<CodeSearchResult> results) {
         // Update the file list model
@@ -800,7 +828,6 @@ public class ChatPanel extends SimpleToolWindowPanel {
             });
             buttonsPanel.add(copyMessageButton);
             messageWithButtonsPanel.add(buttonsPanel, BorderLayout.SOUTH);
-
             panel.add(messageWithButtonsPanel, BorderLayout.CENTER);
         } else {
             panel.add(contentComponent, BorderLayout.CENTER);
@@ -825,7 +852,6 @@ public class ChatPanel extends SimpleToolWindowPanel {
 
         // Use a different color for system messages
         panel.setBackground(new JBColor(new Color(245, 245, 245), new Color(50, 50, 50)));
-
         JLabel contentLabel = new JLabel("<html><div style='width: 500px;'>" + message.replace("\n", "<br/>") + "</div></html>");
         contentLabel.setForeground(JBColor.namedColor("Notification.foreground", JBColor.foreground()));
         panel.add(contentLabel, BorderLayout.CENTER);
@@ -847,7 +873,6 @@ public class ChatPanel extends SimpleToolWindowPanel {
 
         // Use a different color for error messages
         panel.setBackground(new JBColor(new Color(255, 240, 240), new Color(70, 40, 40)));
-
         JLabel contentLabel = new JLabel("<html><div style='width: 500px;'>" + message.replace("\n", "<br/>") + "</div></html>");
         contentLabel.setForeground(JBColor.RED);
         panel.add(contentLabel, BorderLayout.CENTER);
@@ -864,25 +889,50 @@ public class ChatPanel extends SimpleToolWindowPanel {
         textPane.setBackground(null);
         textPane.setOpaque(false);
 
-        // Parse and format the message
-        StyledDocument doc = textPane.getStyledDocument();
-
         // Define styles
+        StyledDocument doc = textPane.getStyledDocument();
         Style defaultStyle = textPane.getStyle(StyleContext.DEFAULT_STYLE);
+
+        // Code block style
         Style codeStyle = textPane.addStyle("code", defaultStyle);
         StyleConstants.setFontFamily(codeStyle, "Monospaced");
         StyleConstants.setBackground(codeStyle, codeBackgroundColor);
+
+        // Link style
         Style linkStyle = textPane.addStyle("link", defaultStyle);
         StyleConstants.setForeground(linkStyle, linkColor);
         StyleConstants.setUnderline(linkStyle, true);
 
+        // Header styles
+        Style h1Style = textPane.addStyle("h1", defaultStyle);
+        StyleConstants.setFontSize(h1Style, StyleConstants.getFontSize(defaultStyle) + 6);
+        StyleConstants.setBold(h1Style, true);
+
+        Style h2Style = textPane.addStyle("h2", defaultStyle);
+        StyleConstants.setFontSize(h2Style, StyleConstants.getFontSize(defaultStyle) + 4);
+        StyleConstants.setBold(h2Style, true);
+
+        Style h3Style = textPane.addStyle("h3", defaultStyle);
+        StyleConstants.setFontSize(h3Style, StyleConstants.getFontSize(defaultStyle) + 2);
+        StyleConstants.setBold(h3Style, true);
+
+        // Bold and italic styles
+        Style boldStyle = textPane.addStyle("bold", defaultStyle);
+        StyleConstants.setBold(boldStyle, true);
+
+        Style italicStyle = textPane.addStyle("italic", defaultStyle);
+        StyleConstants.setItalic(italicStyle, true);
+
         try {
-            // Process code blocks and links
+            // Process markdown
             String[] lines = message.split("\n");
             boolean inCodeBlock = false;
             StringBuilder codeBlock = new StringBuilder();
+
             for (int i = 0; i < lines.length; i++) {
                 String line = lines[i];
+
+                // Handle code blocks
                 if (line.startsWith("```")) {
                     if (inCodeBlock) {
                         // End of code block
@@ -894,35 +944,72 @@ public class ChatPanel extends SimpleToolWindowPanel {
                         // Start of code block
                         inCodeBlock = true;
                     }
-                } else if (inCodeBlock) {
-                    codeBlock.append(line).append("\n");
-                } else {
-                    // Process inline code
-                    int lastIndex = 0;
-                    int index;
-                    while ((index = line.indexOf('`', lastIndex)) >= 0) {
-                        // Add text before the backtick
-                        doc.insertString(doc.getLength(), line.substring(lastIndex, index), defaultStyle);
-
-                        // Find the closing backtick
-                        int closingIndex = line.indexOf('`', index + 1);
-                        if (closingIndex < 0) {
-                            // No closing backtick, treat as normal text
-                            doc.insertString(doc.getLength(), line.substring(index), defaultStyle);
-                            break;
-                        }
-
-                        // Add the code
-                        doc.insertString(doc.getLength(), line.substring(index + 1, closingIndex), codeStyle);
-                        lastIndex = closingIndex + 1;
-                    }
-
-                    // Add any remaining text
-                    if (lastIndex < line.length()) {
-                        doc.insertString(doc.getLength(), line.substring(lastIndex), defaultStyle);
-                    }
-                    doc.insertString(doc.getLength(), "\n", defaultStyle);
+                    continue;
                 }
+
+                if (inCodeBlock) {
+                    codeBlock.append(line).append("\n");
+                    continue;
+                }
+
+                // Handle headers
+                if (line.startsWith("# ")) {
+                    doc.insertString(doc.getLength(), line.substring(2), h1Style);
+                    doc.insertString(doc.getLength(), "\n", defaultStyle);
+                    continue;
+                } else if (line.startsWith("## ")) {
+                    doc.insertString(doc.getLength(), line.substring(3), h2Style);
+                    doc.insertString(doc.getLength(), "\n", defaultStyle);
+                    continue;
+                } else if (line.startsWith("### ")) {
+                    doc.insertString(doc.getLength(), line.substring(4), h3Style);
+                    doc.insertString(doc.getLength(), "\n", defaultStyle);
+                    continue;
+                }
+
+                // Process inline formatting
+                int lastIndex = 0;
+                StringBuilder formattedLine = new StringBuilder();
+
+                // Process inline code
+                while (lastIndex < line.length()) {
+                    int codeStart = line.indexOf('`', lastIndex);
+                    if (codeStart == -1) {
+                        // No more inline code, add the rest of the line
+                        formattedLine.append(line.substring(lastIndex));
+                        break;
+                    }
+
+                    // Add text before the backtick
+                    formattedLine.append(line.substring(lastIndex, codeStart));
+
+                    // Find the closing backtick
+                    int codeEnd = line.indexOf('`', codeStart + 1);
+                    if (codeEnd == -1) {
+                        // No closing backtick, treat as normal text
+                        formattedLine.append(line.substring(codeStart));
+                        break;
+                    }
+
+                    // Add the code with style
+                    String code = line.substring(codeStart + 1, codeEnd);
+                    doc.insertString(doc.getLength(), formattedLine.toString(), defaultStyle);
+                    doc.insertString(doc.getLength(), code, codeStyle);
+
+                    formattedLine = new StringBuilder();
+                    lastIndex = codeEnd + 1;
+                }
+
+                // Add any remaining text
+                if (formattedLine.length() > 0) {
+                    doc.insertString(doc.getLength(), formattedLine.toString(), defaultStyle);
+                }
+
+                // Process bold and italic in the remaining text
+                String remainingText = line.substring(lastIndex);
+                processBoldAndItalic(doc, remainingText, defaultStyle, boldStyle, italicStyle);
+
+                doc.insertString(doc.getLength(), "\n", defaultStyle);
             }
 
             // Handle any remaining code block
@@ -932,11 +1019,47 @@ public class ChatPanel extends SimpleToolWindowPanel {
 
             // Add file path links
             addFilePathLinks(textPane, project);
+
         } catch (BadLocationException e) {
             e.printStackTrace();
         }
 
         return textPane;
+    }
+
+    // Helper method to process bold and italic text
+    private void processBoldAndItalic(StyledDocument doc, String text, Style defaultStyle,
+                                      Style boldStyle, Style italicStyle) throws BadLocationException {
+        int lastIndex = 0;
+
+        // Process bold text
+        while (lastIndex < text.length()) {
+            int boldStart = text.indexOf("**", lastIndex);
+            if (boldStart == -1) {
+                // No more bold, add the rest of the text
+                doc.insertString(doc.getLength(), text.substring(lastIndex), defaultStyle);
+                break;
+            }
+
+            // Add text before the bold marker
+            doc.insertString(doc.getLength(), text.substring(lastIndex, boldStart), defaultStyle);
+
+            // Find the closing bold marker
+            int boldEnd = text.indexOf("**", boldStart + 2);
+            if (boldEnd == -1) {
+                // No closing marker, treat as normal text
+                doc.insertString(doc.getLength(), text.substring(boldStart), defaultStyle);
+                break;
+            }
+
+            // Add the bold text
+            String boldText = text.substring(boldStart + 2, boldEnd);
+            doc.insertString(doc.getLength(), boldText, boldStyle);
+
+            lastIndex = boldEnd + 2;
+        }
+
+        // Similar process for italic text could be added here
     }
 
     private void addFilePathLinks(JTextPane textPane, Project project) {
@@ -955,6 +1078,7 @@ public class ChatPanel extends SimpleToolWindowPanel {
         String[] lines = text.split("\n");
         for (int lineIndex = 0; lineIndex < lines.length; lineIndex++) {
             String line = lines[lineIndex];
+
             // Look for common file extensions
             for (String ext : new String[]{".java", ".kt", ".py", ".js", ".ts", ".c", ".cpp", ".h", ".cs", ".go"}) {
                 int index = 0;

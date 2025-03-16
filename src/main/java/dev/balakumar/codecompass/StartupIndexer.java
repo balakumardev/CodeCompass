@@ -70,7 +70,6 @@ public class StartupIndexer implements ProjectActivity {
             public void run(@NotNull ProgressIndicator indicator) {
                 indicator.setText("Checking AI service and vector database availability...");
                 indicator.setIndeterminate(true);
-
                 boolean aiServiceAvailable = false;
                 boolean vectorDBAvailable = false;
                 String aiServiceName = "";
@@ -88,34 +87,33 @@ public class StartupIndexer implements ProjectActivity {
                         vectorDBService.close();
                     } catch (Exception e) {
                         System.err.println("Vector DB connection error: " + e.getMessage());
+                        ErrorHandler.showError(project, "Vector Database Error",
+                                "Failed to connect to Qdrant: " + e.getMessage());
                     }
 
                     // Show appropriate notification based on service status
                     if (!aiServiceAvailable && !vectorDBAvailable) {
-                        showNotification(project, "CodeCompass Services Unavailable",
+                        ErrorHandler.showError(project, "CodeCompass Services Unavailable",
                                 "Both " + aiServiceName + " AI service and Qdrant vector database are unavailable. " +
-                                        "CodeCompass features will not work correctly.",
-                                NotificationType.ERROR);
+                                        "CodeCompass features will not work correctly.");
                     } else if (!aiServiceAvailable) {
-                        showNotification(project, "CodeCompass AI Service Unavailable",
+                        ErrorHandler.showWarning(project, "CodeCompass AI Service Unavailable",
                                 aiServiceName + " AI service is unavailable. " +
-                                        "Search and question answering features will not work correctly.",
-                                NotificationType.WARNING);
+                                        "Search and question answering features will not work correctly.");
                     } else if (!vectorDBAvailable) {
-                        showNotification(project, "CodeCompass Vector Database Unavailable",
+                        ErrorHandler.showWarning(project, "CodeCompass Vector Database Unavailable",
                                 "Qdrant vector database is unavailable. " +
-                                        "CodeCompass features will not work correctly.",
-                                NotificationType.WARNING);
+                                        "CodeCompass features will not work correctly.");
                     }
                 } catch (Exception e) {
                     System.err.println("Error checking services: " + e.getMessage());
-                    showNotification(project, "CodeCompass Service Check Failed",
-                            "Failed to check service availability: " + e.getMessage(),
-                            NotificationType.ERROR);
+                    ErrorHandler.showError(project, "CodeCompass Service Check Failed",
+                            "Failed to check service availability: " + e.getMessage());
                 }
             }
         }.queue();
     }
+
 
     private void showNotification(Project project, String title, String content, NotificationType type) {
         Notification notification = new Notification(

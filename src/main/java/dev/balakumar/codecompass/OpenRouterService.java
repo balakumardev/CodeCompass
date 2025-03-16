@@ -38,15 +38,15 @@ public class OpenRouterService implements GenerationService {
         try {
             TrustManager[] trustAllCerts = new TrustManager[] {
                     new X509TrustManager() {
-                        public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
+                        public X509Certificate[] getAcceptedIssuers() {
+                            return new X509Certificate[0];
+                        }
                         public void checkClientTrusted(X509Certificate[] certs, String authType) {}
                         public void checkServerTrusted(X509Certificate[] certs, String authType) {}
                     }
             };
-
             SSLContext sslContext = SSLContext.getInstance("SSL");
             sslContext.init(null, trustAllCerts, new SecureRandom());
-
             return new OkHttpClient.Builder()
                     .sslSocketFactory(sslContext.getSocketFactory(), (X509TrustManager)trustAllCerts[0])
                     .hostnameVerifier((hostname, session) -> true)
@@ -69,17 +69,14 @@ public class OpenRouterService implements GenerationService {
 
         JsonObject jsonRequest = new JsonObject();
         jsonRequest.addProperty("model", settings.openRouterGenerationModel);
-
         JsonArray messages = new JsonArray();
         JsonObject message = new JsonObject();
         message.addProperty("role", "user");
-        message.addProperty("content", "Generate a concise summary (max 3 sentences) of this " +
-                language + " file. Include main classes, methods, and functionality:\n\n" + truncatedCode);
+        message.addProperty("content", "Generate a concise summary (max 3 sentences) of this " + language + " file. Include main classes, methods, and functionality:\n\n" + truncatedCode);
         messages.add(message);
         jsonRequest.add("messages", messages);
 
         String jsonRequestString = gson.toJson(jsonRequest);
-
         int retries = 0;
         while (true) {
             try {
@@ -92,8 +89,8 @@ public class OpenRouterService implements GenerationService {
 
                 try (Response response = client.newCall(request).execute()) {
                     if (!response.isSuccessful()) {
-                        String errorBody = response.body() != null ? response.body().string() : "";
-                        throw new IOException("OpenRouter generation API error " + response.code() + ": " + errorBody);
+                        String errorMessage = handleApiError(response);
+                        throw new IOException(errorMessage);
                     }
 
                     String contentType = response.header("Content-Type");
@@ -104,7 +101,6 @@ public class OpenRouterService implements GenerationService {
 
                     String responseBody = response.body().string();
                     JsonObject jsonResponse = gson.fromJson(responseBody, JsonObject.class);
-
                     return jsonResponse.getAsJsonArray("choices")
                             .get(0).getAsJsonObject()
                             .getAsJsonObject("message")
@@ -114,8 +110,7 @@ public class OpenRouterService implements GenerationService {
                 if (shouldRetry(e, retries)) {
                     retries++;
                     int delayMs = isRateLimitError(e) ? RATE_LIMIT_RETRY_DELAY_MS : RETRY_DELAY_MS;
-                    System.out.println("Retrying summary generation after error: " + e.getMessage() +
-                            " (Attempt " + retries + " of " + MAX_RETRIES + ", waiting " + delayMs + "ms)");
+                    System.out.println("Retrying summary generation after error: " + e.getMessage() + " (Attempt " + retries + " of " + MAX_RETRIES + ", waiting " + delayMs + "ms)");
                     try {
                         Thread.sleep(delayMs);
                     } catch (InterruptedException ie) {
@@ -133,7 +128,6 @@ public class OpenRouterService implements GenerationService {
     public String generateCodeContext(String query, List<CodeSearchResult> results) throws IOException {
         JsonObject jsonRequest = new JsonObject();
         jsonRequest.addProperty("model", settings.openRouterGenerationModel);
-
         JsonArray messages = new JsonArray();
 
         // Create a more detailed prompt with code context
@@ -170,7 +164,6 @@ public class OpenRouterService implements GenerationService {
         jsonRequest.add("messages", messages);
 
         String jsonRequestString = gson.toJson(jsonRequest);
-
         int retries = 0;
         while (true) {
             try {
@@ -183,13 +176,12 @@ public class OpenRouterService implements GenerationService {
 
                 try (Response response = client.newCall(request).execute()) {
                     if (!response.isSuccessful()) {
-                        String errorBody = response.body() != null ? response.body().string() : "";
-                        throw new IOException("OpenRouter generation API error " + response.code() + ": " + errorBody);
+                        String errorMessage = handleApiError(response);
+                        throw new IOException(errorMessage);
                     }
 
                     String responseBody = response.body().string();
                     JsonObject jsonResponse = gson.fromJson(responseBody, JsonObject.class);
-
                     return jsonResponse.getAsJsonArray("choices")
                             .get(0).getAsJsonObject()
                             .getAsJsonObject("message")
@@ -199,8 +191,7 @@ public class OpenRouterService implements GenerationService {
                 if (shouldRetry(e, retries)) {
                     retries++;
                     int delayMs = isRateLimitError(e) ? RATE_LIMIT_RETRY_DELAY_MS : RETRY_DELAY_MS;
-                    System.out.println("Retrying context generation after error: " + e.getMessage() +
-                            " (Attempt " + retries + " of " + MAX_RETRIES + ", waiting " + delayMs + "ms)");
+                    System.out.println("Retrying context generation after error: " + e.getMessage() + " (Attempt " + retries + " of " + MAX_RETRIES + ", waiting " + delayMs + "ms)");
                     try {
                         Thread.sleep(delayMs);
                     } catch (InterruptedException ie) {
@@ -218,7 +209,6 @@ public class OpenRouterService implements GenerationService {
     public String askQuestionWithHistory(String question, List<CodeSearchResult> relevantFiles, List<Map<String, Object>> chatHistory) throws IOException {
         JsonObject jsonRequest = new JsonObject();
         jsonRequest.addProperty("model", settings.openRouterGenerationModel);
-
         JsonArray messages = new JsonArray();
 
         // System message to set context and expectations
@@ -263,7 +253,6 @@ public class OpenRouterService implements GenerationService {
                     context.append(content);
                 } else {
                     context.append("// Content not available. Summary: ").append(file.getSummary());
-
                     // Add metadata as comments
                     for (Map.Entry<String, String> entry : file.getMetadata().entrySet()) {
                         if (!entry.getValue().isEmpty()) {
@@ -300,7 +289,6 @@ public class OpenRouterService implements GenerationService {
         jsonRequest.add("parameters", parameters);
 
         String jsonRequestString = gson.toJson(jsonRequest);
-
         return sendQuestionRequest(jsonRequestString);
     }
 
@@ -322,13 +310,12 @@ public class OpenRouterService implements GenerationService {
 
                 try (Response response = client.newCall(request).execute()) {
                     if (!response.isSuccessful()) {
-                        String errorBody = response.body() != null ? response.body().string() : "";
-                        throw new IOException("OpenRouter generation API error " + response.code() + ": " + errorBody);
+                        String errorMessage = handleApiError(response);
+                        throw new IOException(errorMessage);
                     }
 
                     String responseBody = response.body().string();
                     JsonObject jsonResponse = gson.fromJson(responseBody, JsonObject.class);
-
                     return jsonResponse.getAsJsonArray("choices")
                             .get(0).getAsJsonObject()
                             .getAsJsonObject("message")
@@ -338,8 +325,7 @@ public class OpenRouterService implements GenerationService {
                 if (shouldRetry(e, retries)) {
                     retries++;
                     int delayMs = isRateLimitError(e) ? RATE_LIMIT_RETRY_DELAY_MS : RETRY_DELAY_MS;
-                    System.out.println("Retrying question answering after error: " + e.getMessage() +
-                            " (Attempt " + retries + " of " + MAX_RETRIES + ", waiting " + delayMs + "ms)");
+                    System.out.println("Retrying question answering after error: " + e.getMessage() + " (Attempt " + retries + " of " + MAX_RETRIES + ", waiting " + delayMs + "ms)");
                     try {
                         Thread.sleep(delayMs);
                     } catch (InterruptedException ie) {
@@ -353,33 +339,9 @@ public class OpenRouterService implements GenerationService {
         }
     }
 
-
     @Override
     public boolean testConnection() {
         return true;
-//        try {
-//            JsonObject jsonRequest = new JsonObject();
-//            jsonRequest.addProperty("model", settings.openRouterGenerationModel);
-//            JsonArray messages = new JsonArray();
-//            JsonObject message = new JsonObject();
-//            message.addProperty("role", "user");
-//            message.addProperty("content", "Test message");
-//            messages.add(message);
-//            jsonRequest.add("messages", messages);
-//            String jsonRequestString = gson.toJson(jsonRequest);
-//            Request request = new Request.Builder()
-//                    .url(OPENROUTER_GENERATION_ENDPOINT)
-//                    .header("Authorization", "Bearer " + settings.openRouterApiKey)
-//                    .header("Content-Type", "application/json")
-//                    .post(RequestBody.create(jsonRequestString, MediaType.get("application/json")))
-//                    .build();
-//            try (Response response = client.newCall(request).execute()) {
-//                return response.isSuccessful();
-//            }
-//        } catch (Exception e) {
-//            System.err.println("OpenRouter connection test failed: " + e.getMessage());
-//            return false;
-//        }
     }
 
     private String getLanguageFromFileName(String fileName) {
@@ -397,8 +359,12 @@ public class OpenRouterService implements GenerationService {
         if (message == null) {
             return true;
         }
-        return message.contains("timeout") || message.contains("Connection") || message.contains("connection") ||
-                message.contains("reset") || message.contains("closed") || isRateLimitError(e);
+        return message.contains("timeout") ||
+                message.contains("Connection") ||
+                message.contains("connection") ||
+                message.contains("reset") ||
+                message.contains("closed") ||
+                isRateLimitError(e);
     }
 
     private boolean isRateLimitError(IOException e) {
@@ -406,8 +372,27 @@ public class OpenRouterService implements GenerationService {
         if (message == null) {
             return false;
         }
-        return message.contains("429") || message.contains("rate") || message.contains("limit") ||
-                message.contains("quota") || message.contains("capacity") || message.contains("Resource") ||
+        return message.contains("429") ||
+                message.contains("rate") ||
+                message.contains("limit") ||
+                message.contains("quota") ||
+                message.contains("capacity") ||
+                message.contains("Resource") ||
                 message.contains("resource");
+    }
+
+    private String handleApiError(Response response) throws IOException {
+        int statusCode = response.code();
+        String errorBody = response.body() != null ? response.body().string() : "";
+
+        if (statusCode == 401) {
+            return "Authentication error: Invalid API key. Please check your OpenRouter API key in settings.";
+        } else if (statusCode == 429) {
+            return "Rate limit exceeded. Please try again later or reduce request frequency.";
+        } else if (statusCode >= 500) {
+            return "OpenRouter server error. The service may be experiencing issues.";
+        } else {
+            return "OpenRouter API error " + statusCode + ": " + errorBody;
+        }
     }
 }

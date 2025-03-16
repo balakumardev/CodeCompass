@@ -193,10 +193,12 @@ public class CodeQuestionDialog extends DialogWrapper {
         if (question.isEmpty()) {
             return;
         }
+
         JRootPane rootPane = SwingUtilities.getRootPane(this.getContentPane());
         if (rootPane != null) {
             rootPane.setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
         }
+
         answerPane.setText("<html><body><p>Searching for relevant files and generating answer...</p></body></html>");
         copyButton.setEnabled(false);
 
@@ -208,12 +210,14 @@ public class CodeQuestionDialog extends DialogWrapper {
             public void run(@NotNull ProgressIndicator indicator) {
                 indicator.setIndeterminate(true);
                 indicator.setText("Searching for relevant files...");
+
                 try {
                     int limit = (Integer) resultLimitSpinner.getValue();
-                    results = indexer.search(question, limit, currentFilters); // Uses EmbeddingService (Gemini)
+                    results = indexer.search(question, limit, currentFilters);
+
                     if (!results.isEmpty()) {
                         indicator.setText("Generating answer...");
-                        answer = generationService.askQuestion(question, results); // Uses GenerationService (OpenRouter)
+                        answer = generationService.askQuestion(question, results);
                     } else {
                         answer = "No relevant files found in the codebase for your question. Try rephrasing or asking about a different topic.";
                     }
@@ -221,6 +225,7 @@ public class CodeQuestionDialog extends DialogWrapper {
                     results = Collections.emptyList();
                     answer = "Error generating answer: " + e.getMessage();
                     e.printStackTrace();
+                    ErrorHandler.handleApiException(project, "Question Answering", e);
                 }
             }
 
@@ -233,6 +238,7 @@ public class CodeQuestionDialog extends DialogWrapper {
                 answerPane.setCaretPosition(0);
                 copyButton.setEnabled(true);
                 statusLabel.setText("Found " + results.size() + " relevant files out of " + indexer.getDocumentCount() + " indexed files");
+
                 if (rootPane != null) {
                     rootPane.setCursor(Cursor.getDefaultCursor());
                 }
@@ -282,6 +288,7 @@ public class CodeQuestionDialog extends DialogWrapper {
         return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                 .replace("\"", "&quot;").replace("'", "&#39;");
     }
+
 
     private void copyAnswerToClipboard() {
         String plainText = answerPane.getText().replaceAll("<[^>]*>", "").trim();

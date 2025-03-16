@@ -17,6 +17,7 @@ import java.util.concurrent.TimeUnit;
 public class GoogleGeminiService implements EmbeddingService, GenerationService {
     private static final String GEMINI_EMBEDDING_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/%s:embedContent?key=%s";
     private static final String GEMINI_GENERATION_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s";
+
     private OkHttpClient client = new OkHttpClient.Builder()
             .connectTimeout(240, TimeUnit.SECONDS)
             .readTimeout(240, TimeUnit.SECONDS)
@@ -37,15 +38,15 @@ public class GoogleGeminiService implements EmbeddingService, GenerationService 
         try {
             TrustManager[] trustAllCerts = new TrustManager[] {
                     new X509TrustManager() {
-                        public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
+                        public X509Certificate[] getAcceptedIssuers() {
+                            return new X509Certificate[0];
+                        }
                         public void checkClientTrusted(X509Certificate[] certs, String authType) {}
                         public void checkServerTrusted(X509Certificate[] certs, String authType) {}
                     }
             };
-
             SSLContext sslContext = SSLContext.getInstance("SSL");
             sslContext.init(null, trustAllCerts, new SecureRandom());
-
             return new OkHttpClient.Builder()
                     .sslSocketFactory(sslContext.getSocketFactory(), (X509TrustManager)trustAllCerts[0])
                     .hostnameVerifier((hostname, session) -> true)
@@ -65,10 +66,12 @@ public class GoogleGeminiService implements EmbeddingService, GenerationService 
     @Override
     public float[] getEmbedding(String text) throws IOException {
         String endpoint = String.format(GEMINI_EMBEDDING_ENDPOINT, settings.geminiEmbeddingModel, settings.geminiApiKey);
+
         JsonObject requestBody = new JsonObject();
         JsonObject content = new JsonObject();
         JsonArray parts = new JsonArray();
         JsonObject part = new JsonObject();
+
         String truncatedText = text.length() > 8000 ? text.substring(0, 8000) : text;
         part.addProperty("text", truncatedText);
         parts.add(part);
@@ -89,10 +92,12 @@ public class GoogleGeminiService implements EmbeddingService, GenerationService 
             String responseBody = response.body().string();
             JsonObject jsonResponse = gson.fromJson(responseBody, JsonObject.class);
             JsonArray values = jsonResponse.getAsJsonObject("embedding").getAsJsonArray("values");
+
             float[] embedding = new float[values.size()];
             for (int i = 0; i < values.size(); i++) {
                 embedding[i] = values.get(i).getAsFloat();
             }
+
             return embedding;
         } catch (IOException e) {
             throw new IOException("Error getting embedding: " + e.getMessage());
@@ -102,16 +107,6 @@ public class GoogleGeminiService implements EmbeddingService, GenerationService 
     @Override
     public boolean testConnection() {
         return true;
-//        try {
-//            String endpoint = String.format(GEMINI_GENERATION_ENDPOINT, settings.geminiGenerationModel, settings.geminiApiKey);
-//            Request request = new Request.Builder().url(endpoint).get().build();
-//            try (Response response = client.newCall(request).execute()) {
-//                return response.isSuccessful();
-//            }
-//        } catch (IOException e) {
-//            System.err.println("Gemini connection test failed: " + e.getMessage());
-//            return false;
-//        }
     }
 
     // GenerationService Implementation
@@ -120,8 +115,8 @@ public class GoogleGeminiService implements EmbeddingService, GenerationService 
         String endpoint = String.format(GEMINI_GENERATION_ENDPOINT, settings.geminiGenerationModel, settings.geminiApiKey);
         String language = getLanguageFromFileName(fileName);
         String prompt = "Generate a concise summary (max 3 sentences) of this " + language + " file. Include main classes, methods, and functionality:\n\n" + codeContent;
-        JsonObject requestBody = buildGenerationRequest(prompt);
 
+        JsonObject requestBody = buildGenerationRequest(prompt);
         Request request = new Request.Builder()
                 .url(endpoint)
                 .post(RequestBody.create(gson.toJson(requestBody), MediaType.get("application/json")))
@@ -133,12 +128,13 @@ public class GoogleGeminiService implements EmbeddingService, GenerationService 
     @Override
     public String generateCodeContext(String query, List<CodeSearchResult> results) throws IOException {
         String endpoint = String.format(GEMINI_GENERATION_ENDPOINT, settings.geminiGenerationModel, settings.geminiApiKey);
+
         StringBuilder context = new StringBuilder("Generate a code context for the query: \"" + query + "\" based on these files:\n");
         for (CodeSearchResult result : results) {
             context.append(result.getFilePath()).append(": ").append(result.getSummary()).append("\n");
         }
-        JsonObject requestBody = buildGenerationRequest(context.toString());
 
+        JsonObject requestBody = buildGenerationRequest(context.toString());
         Request request = new Request.Builder()
                 .url(endpoint)
                 .post(RequestBody.create(gson.toJson(requestBody), MediaType.get("application/json")))
@@ -155,18 +151,20 @@ public class GoogleGeminiService implements EmbeddingService, GenerationService 
     @Override
     public String askQuestionWithHistory(String question, List<CodeSearchResult> relevantFiles, List<Map<String, Object>> chatHistory) throws IOException {
         String endpoint = String.format(GEMINI_GENERATION_ENDPOINT, settings.geminiGenerationModel, settings.geminiApiKey);
+
         StringBuilder prompt = new StringBuilder("Answer the question: \"" + question + "\" based on these files:\n");
         for (CodeSearchResult file : relevantFiles) {
             prompt.append(file.getFilePath()).append(": ").append(file.getSummary()).append("\n");
         }
+
         if (!chatHistory.isEmpty()) {
             prompt.append("Chat history:\n");
             for (Map<String, Object> entry : chatHistory) {
                 prompt.append(entry.get("role")).append(": ").append(entry.get("content")).append("\n");
             }
         }
-        JsonObject requestBody = buildGenerationRequest(prompt.toString());
 
+        JsonObject requestBody = buildGenerationRequest(prompt.toString());
         Request request = new Request.Builder()
                 .url(endpoint)
                 .post(RequestBody.create(gson.toJson(requestBody), MediaType.get("application/json")))
@@ -182,12 +180,14 @@ public class GoogleGeminiService implements EmbeddingService, GenerationService 
         JsonObject content = new JsonObject();
         JsonArray parts = new JsonArray();
         JsonObject part = new JsonObject();
+
         String truncatedPrompt = prompt.length() > 8000 ? prompt.substring(0, 8000) : prompt;
         part.addProperty("text", truncatedPrompt);
         parts.add(part);
         content.add("parts", parts);
         contents.add(content);
         requestBody.add("contents", contents);
+
         return requestBody;
     }
 
@@ -195,8 +195,9 @@ public class GoogleGeminiService implements EmbeddingService, GenerationService 
         try (Response response = client.newCall(request).execute()) {
             if (!response.isSuccessful()) {
                 String errorBody = response.body() != null ? response.body().string() : "";
-                throw new IOException("Gemini generation API error " + response.code() + ": " + errorBody);
+                throw new IOException(handleApiError(response.code(), errorBody));
             }
+
             String responseBody = response.body().string();
             JsonObject jsonResponse = gson.fromJson(responseBody, JsonObject.class);
             return jsonResponse.getAsJsonArray("candidates")
@@ -211,12 +212,25 @@ public class GoogleGeminiService implements EmbeddingService, GenerationService 
     private String getLanguageFromFileName(String fileName) {
         int dotIndex = fileName.lastIndexOf('.');
         if (dotIndex == -1) return "unknown";
+
         String ext = fileName.substring(dotIndex + 1).toLowerCase();
         switch (ext) {
             case "java": return "Java";
             case "py": return "Python";
             case "js": return "JavaScript";
             default: return ext;
+        }
+    }
+
+    private String handleApiError(int statusCode, String errorBody) {
+        if (statusCode == 401) {
+            return "Authentication error: Invalid API key. Please check your Gemini API key in settings.";
+        } else if (statusCode == 429) {
+            return "Rate limit exceeded. Please try again later or reduce request frequency.";
+        } else if (statusCode >= 500) {
+            return "Gemini server error. The service may be experiencing issues.";
+        } else {
+            return "Gemini API error " + statusCode + ": " + errorBody;
         }
     }
 }

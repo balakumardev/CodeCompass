@@ -9,6 +9,7 @@ import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
+import javax.swing.text.*;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import javax.swing.*;
@@ -25,7 +26,7 @@ public class EnhancedSearchDialog extends DialogWrapper {
     private JTextField searchField;
     private JBList<CodeSearchResult> resultList;
     private JTextArea summaryArea;
-    private JTextArea contextArea;
+    private JTextPane contextArea; // Changed from JTextArea to JTextPane to support styled document
     private final Project project;
     private JLabel statusLabel;
     private String lastQuery = "";
@@ -135,11 +136,10 @@ public class EnhancedSearchDialog extends DialogWrapper {
         JScrollPane summaryScrollPane = new JScrollPane(summaryArea);
         summaryScrollPane.setBorder(BorderFactory.createTitledBorder(BorderFactory.createEtchedBorder(), "File Summary"));
 
-        contextArea = new JTextArea();
+        contextArea = new JTextPane(); // Changed from JTextArea to JTextPane
         contextArea.setEditable(false);
-        contextArea.setLineWrap(true);
-        contextArea.setWrapStyleWord(true);
-        contextArea.setRows(12);
+        // JTextPane doesn't have setLineWrap and setWrapStyleWord methods
+        // But it wraps text by default
         JScrollPane contextScrollPane = new JScrollPane(contextArea);
         contextScrollPane.setBorder(BorderFactory.createTitledBorder(BorderFactory.createEtchedBorder(), "Search Context"));
 
@@ -169,11 +169,13 @@ public class EnhancedSearchDialog extends DialogWrapper {
         if (query.isEmpty()) {
             return;
         }
+
         lastQuery = query;
         JRootPane rootPane = SwingUtilities.getRootPane(this.getContentPane());
         if (rootPane != null) {
             rootPane.setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
         }
+
         ProgressManager.getInstance().run(new Task.Backgroundable(project, "Searching...") {
             private List<CodeSearchResult> results;
             private String searchContext;
@@ -192,6 +194,7 @@ public class EnhancedSearchDialog extends DialogWrapper {
                     results = Collections.emptyList();
                     searchContext = "Error during search: " + e.getMessage();
                     e.printStackTrace();
+                    ErrorHandler.handleApiException(project, "Search", e);
                 }
             }
 
@@ -200,8 +203,10 @@ public class EnhancedSearchDialog extends DialogWrapper {
                 currentResults = results;
                 resultList.setListData(results.toArray(new CodeSearchResult[0]));
                 copyButton.setEnabled(!results.isEmpty());
-                contextArea.setText(searchContext);
+                // Use the displayFormattedContext method instead of setText
+                displayFormattedContext(searchContext);
                 statusLabel.setText("Found " + results.size() + " results out of " + indexer.getDocumentCount() + " indexed files");
+
                 JRootPane rootPane = SwingUtilities.getRootPane(getContentPane());
                 if (rootPane != null) {
                     rootPane.setCursor(Cursor.getDefaultCursor());
@@ -216,6 +221,107 @@ public class EnhancedSearchDialog extends DialogWrapper {
                 }
             }
         });
+    }
+
+    // Add this method to EnhancedSearchDialog.java
+    // Fixed method to use JTextPane's getStyledDocument
+    private void displayFormattedContext(String context) {
+        // Create a styled document for the context area
+        contextArea.setText("");
+        StyledDocument doc = contextArea.getStyledDocument();
+
+        // Define styles
+        Style defaultStyle = contextArea.getStyle(StyleContext.DEFAULT_STYLE);
+
+        Style codeStyle = contextArea.addStyle("code", defaultStyle);
+        StyleConstants.setFontFamily(codeStyle, "Monospaced");
+        StyleConstants.setBackground(codeStyle, new Color(240, 240, 240));
+
+        Style fileStyle = contextArea.addStyle("file", defaultStyle);
+        StyleConstants.setBold(fileStyle, true);
+        StyleConstants.setForeground(fileStyle, new Color(0, 102, 204));
+
+        Style highlightStyle = contextArea.addStyle("highlight", defaultStyle);
+        StyleConstants.setBackground(highlightStyle, new Color(255, 255, 204));
+
+        try {
+            String[] lines = context.split("\n");
+            boolean inCodeBlock = false;
+            StringBuilder codeBlock = new StringBuilder();
+
+            for (int i = 0; i < lines.length; i++) {
+                String line = lines[i];
+
+                // Handle code blocks
+                if (line.startsWith("```")) {
+                    if (inCodeBlock) {
+                        // End of code block
+                        doc.insertString(doc.getLength(), codeBlock.toString(), codeStyle);
+                        doc.insertString(doc.getLength(), "\n", defaultStyle);
+                        codeBlock = new StringBuilder();
+                        inCodeBlock = false;
+                    } else {
+                        // Start of code block
+                        inCodeBlock = true;
+                    }
+                    continue;
+                }
+
+                if (inCodeBlock) {
+                    codeBlock.append(line).append("\n");
+                    continue;
+                }
+
+                // Highlight file paths
+                if (line.matches(".*File \\d+:.*")) {
+                    int colonIndex = line.indexOf(":");
+                    if (colonIndex > 0) {
+                        doc.insertString(doc.getLength(), line.substring(0, colonIndex + 1), defaultStyle);
+                        doc.insertString(doc.getLength(), line.substring(colonIndex + 1), fileStyle);
+                        doc.insertString(doc.getLength(), "\n", defaultStyle);
+                        continue;
+                    }
+                }
+
+                // Process inline code
+                int lastIndex = 0;
+                while (lastIndex < line.length()) {
+                    int codeStart = line.indexOf('`', lastIndex);
+                    if (codeStart == -1) {
+                        // No more inline code, add the rest of the line
+                        doc.insertString(doc.getLength(), line.substring(lastIndex), defaultStyle);
+                        break;
+                    }
+
+                    // Add text before the backtick
+                    doc.insertString(doc.getLength(), line.substring(lastIndex, codeStart), defaultStyle);
+
+                    // Find the closing backtick
+                    int codeEnd = line.indexOf('`', codeStart + 1);
+                    if (codeEnd == -1) {
+                        // No closing backtick, treat as normal text
+                        doc.insertString(doc.getLength(), line.substring(codeStart), defaultStyle);
+                        break;
+                    }
+
+                    // Add the code with style
+                    doc.insertString(doc.getLength(), line.substring(codeStart + 1, codeEnd), codeStyle);
+                    lastIndex = codeEnd + 1;
+                }
+
+                doc.insertString(doc.getLength(), "\n", defaultStyle);
+            }
+
+            // Handle any remaining code block
+            if (inCodeBlock && codeBlock.length() > 0) {
+                doc.insertString(doc.getLength(), codeBlock.toString(), codeStyle);
+            }
+
+        } catch (BadLocationException e) {
+            e.printStackTrace();
+            // Fallback to plain text if styling fails
+            contextArea.setText(context);
+        }
     }
 
     private void copyPathsToClipboard() {
