@@ -10,8 +10,24 @@ import org.jetbrains.annotations.Nullable;
 
 @State(name = "CodeMapperSettings", storages = @Storage("codeMapperSettings.xml"))
 public class CodeMapperSettingsState implements PersistentStateComponent<CodeMapperSettingsState> {
+    // AI Provider selection
     public String aiProvider = "OPENROUTER";
     public boolean enableStartupIndexing = false;
+
+    // API Keys
+    public String openRouterApiKey = "";
+    public String geminiApiKey = "";
+    public String ollamaEndpoint = "http://localhost:11434";
+
+    // Embedding Models
+    public String openRouterEmbeddingModel = "openai/text-embedding-3-small";
+    public String geminiEmbeddingModel = "embedding-001";
+    public String ollamaEmbeddingModel = "nomic-embed-text";
+
+    // Generation Models
+    public String openRouterGenerationModel = "google/gemini-2.0-flash-exp:free";
+    public String geminiGenerationModel = "gemini-1.5-pro";
+    public String ollamaGenerationModel = "codellama:7b-code";
 
     @Nullable
     @Override
@@ -23,6 +39,21 @@ public class CodeMapperSettingsState implements PersistentStateComponent<CodeMap
     public void loadState(@NotNull CodeMapperSettingsState state) {
         this.aiProvider = state.aiProvider;
         this.enableStartupIndexing = state.enableStartupIndexing;
+
+        // API Keys
+        this.openRouterApiKey = state.openRouterApiKey;
+        this.geminiApiKey = state.geminiApiKey;
+        this.ollamaEndpoint = state.ollamaEndpoint;
+
+        // Embedding Models
+        this.openRouterEmbeddingModel = state.openRouterEmbeddingModel;
+        this.geminiEmbeddingModel = state.geminiEmbeddingModel;
+        this.ollamaEmbeddingModel = state.ollamaEmbeddingModel;
+
+        // Generation Models
+        this.openRouterGenerationModel = state.openRouterGenerationModel;
+        this.geminiGenerationModel = state.geminiGenerationModel;
+        this.ollamaGenerationModel = state.ollamaGenerationModel;
     }
 
     public static CodeMapperSettingsState getInstance(Project project) {

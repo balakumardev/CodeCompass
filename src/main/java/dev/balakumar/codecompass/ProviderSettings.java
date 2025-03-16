@@ -8,13 +8,13 @@ public class ProviderSettings {
         String provider = settings.aiProvider;
         switch (provider) {
             case "OLLAMA":
-                return new OllamaService();
+                return new OllamaService(project);
             case "GEMINI":
-                return new GoogleGeminiService();
+                return new GoogleGeminiService(project);
             case "OPENROUTER":
-                return new OpenRouterService();
+                return new OpenRouterService(project);
             default:
-                return new OpenRouterService();
+                return new OpenRouterService(project);
         }
     }
 }

@@ -1,5 +1,6 @@
 package dev.balakumar.codecompass;
 
+import com.intellij.openapi.project.Project;
 import java.util.Map;
 import okhttp3.*;
 import com.google.gson.*;
@@ -10,7 +11,7 @@ import java.util.concurrent.TimeUnit;
 
 public class OpenRouterService implements AIService {
     private static final String OPENROUTER_GENERATION_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
-    private static final String GENERATION_MODEL = "google/gemini-2.0-flash-exp:free";
+    private static final String OPENROUTER_EMBEDDING_ENDPOINT = "https://openrouter.ai/api/v1/embeddings";
 
     private final OkHttpClient client = new OkHttpClient.Builder()
             .connectTimeout(240, TimeUnit.SECONDS)
@@ -18,24 +19,69 @@ public class OpenRouterService implements AIService {
             .build();
 
     private final Gson gson = new Gson();
-    private final String openRouterApiKey = System.getProperty("openrouter.apiKey", "apijet");
-    private final GoogleGeminiService geminiService = new GoogleGeminiService();
+    private final Project project;
+    private final CodeMapperSettingsState settings;
 
     private static final int MAX_RETRIES = 3;
     private static final int RETRY_DELAY_MS = 2000;
     private static final int RATE_LIMIT_RETRY_DELAY_MS = 5000;
 
+    public OpenRouterService(Project project) {
+        this.project = project;
+        this.settings = CodeMapperSettingsState.getInstance(project);
+    }
+
     @Override
     public float[] getEmbedding(String text) throws IOException {
+        String truncatedText = text.length() > 8000 ? text.substring(0, 8000) : text;
+
+        JsonObject jsonRequest = new JsonObject();
+        jsonRequest.addProperty("model", settings.openRouterEmbeddingModel);
+        jsonRequest.addProperty("input", truncatedText);
+
+        String jsonRequestString = gson.toJson(jsonRequest);
+
         int retries = 0;
         while (true) {
             try {
-                return geminiService.getEmbedding(text);
+                Request request = new Request.Builder()
+                        .url(OPENROUTER_EMBEDDING_ENDPOINT)
+                        .header("Authorization", "Bearer " + settings.openRouterApiKey)
+                        .header("Content-Type", "application/json")
+                        .post(RequestBody.create(jsonRequestString, MediaType.get("application/json")))
+                        .build();
+
+                try (Response response = client.newCall(request).execute()) {
+                    if (!response.isSuccessful()) {
+                        String errorBody = response.body() != null ? response.body().string() : "";
+                        throw new IOException("OpenRouter embedding API error " + response.code() + ": " + errorBody);
+                    }
+
+                    String responseBody = response.body().string();
+                    JsonObject jsonResponse = gson.fromJson(responseBody, JsonObject.class);
+
+                    // Fixed: Access the data array properly
+                    JsonArray dataArray = jsonResponse.getAsJsonArray("data");
+                    if (dataArray == null || dataArray.size() == 0) {
+                        throw new IOException("No data found in embedding response: " + responseBody);
+                    }
+
+                    JsonObject firstData = dataArray.get(0).getAsJsonObject();
+                    JsonArray embeddingArray = firstData.getAsJsonArray("embedding");
+
+                    float[] embedding = new float[embeddingArray.size()];
+                    for (int i = 0; i < embeddingArray.size(); i++) {
+                        embedding[i] = embeddingArray.get(i).getAsFloat();
+                    }
+
+                    return embedding;
+                }
             } catch (IOException e) {
                 if (shouldRetry(e, retries)) {
                     retries++;
                     int delayMs = isRateLimitError(e) ? RATE_LIMIT_RETRY_DELAY_MS : RETRY_DELAY_MS;
-                    System.out.println("Retrying embedding request after error: " + e.getMessage() + " (Attempt " + retries + " of " + MAX_RETRIES + ", waiting " + delayMs + "ms)");
+                    System.out.println("Retrying embedding request after error: " + e.getMessage() +
+                            " (Attempt " + retries + " of " + MAX_RETRIES + ", waiting " + delayMs + "ms)");
                     try {
                         Thread.sleep(delayMs);
                     } catch (InterruptedException ie) {
@@ -55,15 +101,16 @@ public class OpenRouterService implements AIService {
         String language = getLanguageFromFileName(fileName);
 
         JsonObject jsonRequest = new JsonObject();
-        jsonRequest.addProperty("model", GENERATION_MODEL);
+        jsonRequest.addProperty("model", settings.openRouterGenerationModel);
 
         JsonArray messages = new JsonArray();
         JsonObject message = new JsonObject();
         message.addProperty("role", "user");
-        message.addProperty("content", "Generate a concise summary (max 3 sentences) of this " + language + " file. Include main classes, methods, and functionality:\n\n" + truncatedCode);
+        message.addProperty("content", "Generate a concise summary (max 3 sentences) of this " +
+                language + " file. Include main classes, methods, and functionality:\n\n" + truncatedCode);
         messages.add(message);
-
         jsonRequest.add("messages", messages);
+
         String jsonRequestString = gson.toJson(jsonRequest);
 
         int retries = 0;
@@ -71,7 +118,7 @@ public class OpenRouterService implements AIService {
             try {
                 Request request = new Request.Builder()
                         .url(OPENROUTER_GENERATION_ENDPOINT)
-                        .header("Authorization", "Bearer " + openRouterApiKey)
+                        .header("Authorization", "Bearer " + settings.openRouterApiKey)
                         .header("Content-Type", "application/json")
                         .post(RequestBody.create(jsonRequestString, MediaType.get("application/json")))
                         .build();
@@ -100,7 +147,8 @@ public class OpenRouterService implements AIService {
                 if (shouldRetry(e, retries)) {
                     retries++;
                     int delayMs = isRateLimitError(e) ? RATE_LIMIT_RETRY_DELAY_MS : RETRY_DELAY_MS;
-                    System.out.println("Retrying summary generation after error: " + e.getMessage() + " (Attempt " + retries + " of " + MAX_RETRIES + ", waiting " + delayMs + "ms)");
+                    System.out.println("Retrying summary generation after error: " + e.getMessage() +
+                            " (Attempt " + retries + " of " + MAX_RETRIES + ", waiting " + delayMs + "ms)");
                     try {
                         Thread.sleep(delayMs);
                     } catch (InterruptedException ie) {
@@ -117,7 +165,7 @@ public class OpenRouterService implements AIService {
     @Override
     public String generateCodeContext(String query, List<CodeSearchResult> results) throws IOException {
         JsonObject jsonRequest = new JsonObject();
-        jsonRequest.addProperty("model", GENERATION_MODEL);
+        jsonRequest.addProperty("model", settings.openRouterGenerationModel);
 
         JsonArray messages = new JsonArray();
 
@@ -152,8 +200,8 @@ public class OpenRouterService implements AIService {
         message.addProperty("role", "user");
         message.addProperty("content", prompt.toString());
         messages.add(message);
-
         jsonRequest.add("messages", messages);
+
         String jsonRequestString = gson.toJson(jsonRequest);
 
         int retries = 0;
@@ -161,7 +209,7 @@ public class OpenRouterService implements AIService {
             try {
                 Request request = new Request.Builder()
                         .url(OPENROUTER_GENERATION_ENDPOINT)
-                        .header("Authorization", "Bearer " + openRouterApiKey)
+                        .header("Authorization", "Bearer " + settings.openRouterApiKey)
                         .header("Content-Type", "application/json")
                         .post(RequestBody.create(jsonRequestString, MediaType.get("application/json")))
                         .build();
@@ -184,7 +232,8 @@ public class OpenRouterService implements AIService {
                 if (shouldRetry(e, retries)) {
                     retries++;
                     int delayMs = isRateLimitError(e) ? RATE_LIMIT_RETRY_DELAY_MS : RETRY_DELAY_MS;
-                    System.out.println("Retrying context generation after error: " + e.getMessage() + " (Attempt " + retries + " of " + MAX_RETRIES + ", waiting " + delayMs + "ms)");
+                    System.out.println("Retrying context generation after error: " + e.getMessage() +
+                            " (Attempt " + retries + " of " + MAX_RETRIES + ", waiting " + delayMs + "ms)");
                     try {
                         Thread.sleep(delayMs);
                     } catch (InterruptedException ie) {
@@ -201,7 +250,8 @@ public class OpenRouterService implements AIService {
     @Override
     public String askQuestionWithHistory(String question, List<CodeSearchResult> relevantFiles, List<Map<String, Object>> chatHistory) throws IOException {
         JsonObject jsonRequest = new JsonObject();
-        jsonRequest.addProperty("model", GENERATION_MODEL);
+        jsonRequest.addProperty("model", settings.openRouterGenerationModel);
+
         JsonArray messages = new JsonArray();
 
         // System message to set context and expectations
@@ -274,7 +324,6 @@ public class OpenRouterService implements AIService {
 
         userMessage.addProperty("content", userContent);
         messages.add(userMessage);
-
         jsonRequest.add("messages", messages);
 
         // Add generation parameters
@@ -284,9 +333,9 @@ public class OpenRouterService implements AIService {
         jsonRequest.add("parameters", parameters);
 
         String jsonRequestString = gson.toJson(jsonRequest);
+
         return sendQuestionRequest(jsonRequestString);
     }
-
 
     @Override
     public String askQuestion(String question, List<CodeSearchResult> relevantFiles) throws IOException {
@@ -299,7 +348,7 @@ public class OpenRouterService implements AIService {
             try {
                 Request request = new Request.Builder()
                         .url(OPENROUTER_GENERATION_ENDPOINT)
-                        .header("Authorization", "Bearer " + openRouterApiKey)
+                        .header("Authorization", "Bearer " + settings.openRouterApiKey)
                         .header("Content-Type", "application/json")
                         .post(RequestBody.create(jsonRequestString, MediaType.get("application/json")))
                         .build();
@@ -322,7 +371,8 @@ public class OpenRouterService implements AIService {
                 if (shouldRetry(e, retries)) {
                     retries++;
                     int delayMs = isRateLimitError(e) ? RATE_LIMIT_RETRY_DELAY_MS : RETRY_DELAY_MS;
-                    System.out.println("Retrying question answering after error: " + e.getMessage() + " (Attempt " + retries + " of " + MAX_RETRIES + ", waiting " + delayMs + "ms)");
+                    System.out.println("Retrying question answering after error: " + e.getMessage() +
+                            " (Attempt " + retries + " of " + MAX_RETRIES + ", waiting " + delayMs + "ms)");
                     try {
                         Thread.sleep(delayMs);
                     } catch (InterruptedException ie) {
@@ -338,32 +388,14 @@ public class OpenRouterService implements AIService {
 
     @Override
     public boolean testConnection() {
-        return true;
-//        int retries = 0;
-//        while (retries < MAX_RETRIES) {
-//            try {
-//                Request request = new Request.Builder()
-//                        .url(OPENROUTER_GENERATION_ENDPOINT)
-//                        .header("Authorization", "Bearer " + openRouterApiKey)
-//                        .post(RequestBody.create("", MediaType.get("application/json")))
-//                        .build();
-//
-//                try (Response response = client.newCall(request).execute()) {
-//                    // Even a 401/403 means the service is up, just not authorized
-//                    return response.isSuccessful() || response.code() == 401 || response.code() == 403;
-//                }
-//            } catch (IOException e) {
-//                System.err.println("OpenRouter connection test failed (attempt " + (retries + 1) + " of " + MAX_RETRIES + "): " + e.getMessage());
-//                retries++;
-//                try {
-//                    Thread.sleep(RETRY_DELAY_MS);
-//                } catch (InterruptedException ie) {
-//                    Thread.currentThread().interrupt();
-//                    return false;
-//                }
-//            }
-//        }
-//        return false;
+        try {
+            // Use a simple embedding call as a connectivity test
+            float[] testEmbedding = getEmbedding("test");
+            return testEmbedding != null && testEmbedding.length > 0;
+        } catch (Exception e) {
+            System.err.println("OpenRouter connection test failed: " + e.getMessage());
+            return false;
+        }
     }
 
     private String getLanguageFromFileName(String fileName) {
@@ -377,10 +409,12 @@ public class OpenRouterService implements AIService {
         if (currentRetries >= MAX_RETRIES) {
             return false;
         }
+
         String message = e.getMessage();
         if (message == null) {
             return true;
         }
+
         // Retry on network errors, timeouts, and rate limits
         return message.contains("timeout") ||
                 message.contains("Connection") ||
@@ -395,6 +429,7 @@ public class OpenRouterService implements AIService {
         if (message == null) {
             return false;
         }
+
         return message.contains("429") ||
                 message.contains("rate") ||
                 message.contains("limit") ||
