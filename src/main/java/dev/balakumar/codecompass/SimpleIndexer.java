@@ -8,8 +8,9 @@ import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class SimpleIndexer {
-    private final AIService aiService;
+    private final EmbeddingService aiService;
     private VectorDBService vectorDBService;
+    private GenerationService genService;
     private Project project;
     private static final int MAX_RETRIES = 3;
     private static final int RETRY_DELAY_MS = 2000;
@@ -17,7 +18,8 @@ public class SimpleIndexer {
 
     public SimpleIndexer(Project project) {
         this.project = project;
-        this.aiService = ProviderSettings.getAIService(project);
+        this.aiService = ProviderSettings.getEmbeddingService(project);
+        this.genService = ProviderSettings.getGenerationService(project);
         try {
             this.vectorDBService = new VectorDBService(project.getBasePath(), aiService);
         } catch (IOException e) {
@@ -323,7 +325,7 @@ public class SimpleIndexer {
 
                 enhancedText.append("Code:\n").append(content);
 
-                String summary = aiService.generateSummary(content, file.getName());
+                String summary = genService.generateSummary(content, file.getName());
                 vectorDBService.addOrUpdateDocument(file.getPath(), enhancedText.toString(), file.getPath(), summary, metadata);
 
                 // Success, exit retry loop
@@ -483,7 +485,7 @@ public class SimpleIndexer {
         int retries = 0;
         while (retries < MAX_RETRIES) {
             try {
-                return aiService.generateCodeContext(query, results);
+                return genService.generateCodeContext(query, results);
             } catch (IOException e) {
                 retries++;
                 System.err.println("Error generating search context (attempt " + retries +

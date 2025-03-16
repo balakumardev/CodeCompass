@@ -23,14 +23,14 @@ import java.awt.*;
 import java.awt.datatransfer.StringSelection;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
-import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.HashMap;
 
 public class CodeQuestionDialog extends DialogWrapper {
     private final SimpleIndexer indexer;
+    private final GenerationService generationService;
     private JTextField questionField;
     private JEditorPane answerPane;
     private JBList<CodeSearchResult> relevantFilesList;
@@ -46,7 +46,8 @@ public class CodeQuestionDialog extends DialogWrapper {
     public CodeQuestionDialog(Project project) {
         super(project);
         this.project = project;
-        this.indexer = new SimpleIndexer(project);
+        this.indexer = new SimpleIndexer(project); // Assumes SimpleIndexer retrieves EmbeddingService internally
+        this.generationService = ProviderSettings.getGenerationService(project); // Default: OpenRouter
         setTitle("Ask Questions About Your Code");
         setSize(1000, 800);
         init();
@@ -58,24 +59,13 @@ public class CodeQuestionDialog extends DialogWrapper {
         panel.setPreferredSize(new Dimension(1000, 800));
         panel.setBorder(new EmptyBorder(10, 10, 10, 10));
 
-        // Top panel with question field and buttons
+        // **Top Panel: Question Input and Buttons**
         JPanel topPanel = new JPanel(new BorderLayout(5, 0));
         questionField = new JTextField();
         questionField.getDocument().addDocumentListener(new DocumentListener() {
-            @Override
-            public void insertUpdate(DocumentEvent e) {
-                updateAskButtonState();
-            }
-
-            @Override
-            public void removeUpdate(DocumentEvent e) {
-                updateAskButtonState();
-            }
-
-            @Override
-            public void changedUpdate(DocumentEvent e) {
-                updateAskButtonState();
-            }
+            public void insertUpdate(DocumentEvent e) { updateAskButtonState(); }
+            public void removeUpdate(DocumentEvent e) { updateAskButtonState(); }
+            public void changedUpdate(DocumentEvent e) { updateAskButtonState(); }
         });
         topPanel.add(questionField, BorderLayout.CENTER);
 
@@ -84,26 +74,22 @@ public class CodeQuestionDialog extends DialogWrapper {
         askButton.setEnabled(false);
         askButton.addActionListener(e -> askQuestion());
         buttonPanel.add(askButton);
-
         copyButton = new JButton("Copy Answer");
         copyButton.setEnabled(false);
         copyButton.addActionListener(e -> copyAnswerToClipboard());
         buttonPanel.add(copyButton);
-
         topPanel.add(buttonPanel, BorderLayout.EAST);
 
-        // Filter panel
+        // **Filter Panel: Language and Result Limit**
         JPanel filterPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
         filterPanel.add(new JLabel("Language:"));
-
         languageFilterComboBox = new JComboBox<>();
         languageFilterComboBox.addItem("All Languages");
 
-        // Populate language filter with available languages
         VectorDBService vectorDB = null;
         try {
-            AIService aiService = ProviderSettings.getAIService(project);
-            vectorDB = new VectorDBService(project.getBasePath(), aiService);
+            EmbeddingService embeddingService = ProviderSettings.getEmbeddingService(project); // Default: Gemini
+            vectorDB = new VectorDBService(project.getBasePath(), embeddingService);
             List<String> languages = vectorDB.getUniqueLanguages();
             for (String language : languages) {
                 languageFilterComboBox.addItem(language);
@@ -115,7 +101,6 @@ public class CodeQuestionDialog extends DialogWrapper {
                 vectorDB.close();
             }
         }
-
         languageFilterComboBox.addActionListener(e -> {
             String selectedLanguage = (String) languageFilterComboBox.getSelectedItem();
             if ("All Languages".equals(selectedLanguage)) {
@@ -130,22 +115,19 @@ public class CodeQuestionDialog extends DialogWrapper {
         SpinnerNumberModel spinnerModel = new SpinnerNumberModel(10, 1, 50, 1);
         resultLimitSpinner = new JSpinner(spinnerModel);
         filterPanel.add(resultLimitSpinner);
-
         topPanel.add(filterPanel, BorderLayout.SOUTH);
 
-        // Main content panel
+        // **Main Content: Files and Answer**
         JPanel contentPanel = new JPanel(new BorderLayout(10, 10));
 
-        // Left panel with relevant files
+        // Left: Relevant Files List
         JPanel leftPanel = new JPanel(new BorderLayout());
         leftPanel.setBorder(BorderFactory.createTitledBorder("Relevant Files"));
-
         relevantFilesList = new JBList<>();
         relevantFilesList.setCellRenderer(new DefaultListCellRenderer() {
             @Override
             public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected, boolean cellHasFocus) {
-                if (value instanceof CodeSearchResult) {
-                    CodeSearchResult result = (CodeSearchResult) value;
+                if (value instanceof CodeSearchResult result) {
                     String displayPath = getDisplayPath(result.getFilePath());
                     String text = String.format("%s (%.2f)", displayPath, result.getSimilarity());
                     return super.getListCellRendererComponent(list, text, index, isSelected, cellHasFocus);
@@ -155,58 +137,43 @@ public class CodeQuestionDialog extends DialogWrapper {
 
             private String getDisplayPath(String path) {
                 String basePath = project.getBasePath();
-                if (basePath != null && path.startsWith(basePath)) {
-                    return path.substring(basePath.length() + 1);
-                }
-                return path;
+                return (basePath != null && path.startsWith(basePath)) ? path.substring(basePath.length() + 1) : path;
             }
         });
-
         relevantFilesList.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
-                if (e.getClickCount() == 2) {
-                    CodeSearchResult selectedResult = relevantFilesList.getSelectedValue();
-                    if (selectedResult != null) {
-                        openFile(selectedResult.getFilePath());
-                    }
+                if (e.getClickCount() == 2 && relevantFilesList.getSelectedValue() != null) {
+                    openFile(relevantFilesList.getSelectedValue().getFilePath());
                 }
             }
         });
+        leftPanel.add(new JBScrollPane(relevantFilesList), BorderLayout.CENTER);
 
-        JBScrollPane filesScrollPane = new JBScrollPane(relevantFilesList);
-        leftPanel.add(filesScrollPane, BorderLayout.CENTER);
-
-        // Right panel with answer
+        // Right: Answer Display
         JPanel rightPanel = new JPanel(new BorderLayout());
         rightPanel.setBorder(BorderFactory.createTitledBorder("Answer"));
-
         answerPane = new JEditorPane();
         answerPane.setEditable(false);
         answerPane.setContentType("text/html");
-
-        // Configure HTML styling
         HTMLEditorKit kit = new HTMLEditorKit();
         answerPane.setEditorKit(kit);
         StyleSheet styleSheet = kit.getStyleSheet();
         styleSheet.addRule("body { font-family: Arial, sans-serif; margin: 10px; }");
         styleSheet.addRule("pre { background-color: #f5f5f5; padding: 10px; border-radius: 5px; }");
         styleSheet.addRule("code { font-family: monospace; }");
+        rightPanel.add(new JBScrollPane(answerPane), BorderLayout.CENTER);
 
-        JBScrollPane answerScrollPane = new JBScrollPane(answerPane);
-        rightPanel.add(answerScrollPane, BorderLayout.CENTER);
-
-        // Split pane
+        // Split Pane
         JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, leftPanel, rightPanel);
         splitPane.setResizeWeight(0.3);
         contentPanel.add(splitPane, BorderLayout.CENTER);
 
+        // Assemble Panel
         panel.add(topPanel, BorderLayout.NORTH);
         panel.add(contentPanel, BorderLayout.CENTER);
-
         statusLabel = new JLabel("Ready to answer questions. Indexed " + indexer.getDocumentCount() + " files.");
         panel.add(statusLabel, BorderLayout.SOUTH);
-
         return panel;
     }
 
@@ -226,12 +193,10 @@ public class CodeQuestionDialog extends DialogWrapper {
         if (question.isEmpty()) {
             return;
         }
-
         JRootPane rootPane = SwingUtilities.getRootPane(this.getContentPane());
         if (rootPane != null) {
             rootPane.setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
         }
-
         answerPane.setText("<html><body><p>Searching for relevant files and generating answer...</p></body></html>");
         copyButton.setEnabled(false);
 
@@ -243,18 +208,12 @@ public class CodeQuestionDialog extends DialogWrapper {
             public void run(@NotNull ProgressIndicator indicator) {
                 indicator.setIndeterminate(true);
                 indicator.setText("Searching for relevant files...");
-
                 try {
-                    // Get result limit from spinner
                     int limit = (Integer) resultLimitSpinner.getValue();
-
-                    // Search for relevant files with filters
-                    results = indexer.search(question, limit, currentFilters);
-
+                    results = indexer.search(question, limit, currentFilters); // Uses EmbeddingService (Gemini)
                     if (!results.isEmpty()) {
                         indicator.setText("Generating answer...");
-                        AIService aiService = ProviderSettings.getAIService(project);
-                        answer = aiService.askQuestion(question, results);
+                        answer = generationService.askQuestion(question, results); // Uses GenerationService (OpenRouter)
                     } else {
                         answer = "No relevant files found in the codebase for your question. Try rephrasing or asking about a different topic.";
                     }
@@ -269,16 +228,11 @@ public class CodeQuestionDialog extends DialogWrapper {
             public void onSuccess() {
                 currentResults = results;
                 relevantFilesList.setListData(results.toArray(new CodeSearchResult[0]));
-
-                // Format answer with HTML
                 String formattedAnswer = formatAnswerAsHtml(answer);
                 answerPane.setText(formattedAnswer);
                 answerPane.setCaretPosition(0);
-
                 copyButton.setEnabled(true);
                 statusLabel.setText("Found " + results.size() + " relevant files out of " + indexer.getDocumentCount() + " indexed files");
-
-                JRootPane rootPane = SwingUtilities.getRootPane(getContentPane());
                 if (rootPane != null) {
                     rootPane.setCursor(Cursor.getDefaultCursor());
                 }
@@ -286,7 +240,6 @@ public class CodeQuestionDialog extends DialogWrapper {
 
             @Override
             public void onFinished() {
-                JRootPane rootPane = SwingUtilities.getRootPane(getContentPane());
                 if (rootPane != null) {
                     rootPane.setCursor(Cursor.getDefaultCursor());
                 }
@@ -295,89 +248,43 @@ public class CodeQuestionDialog extends DialogWrapper {
     }
 
     private String formatAnswerAsHtml(String answer) {
-        if (answer == null || answer.isEmpty()) {
+        if (answer == null || answer.trim().isEmpty()) {
             return "<html><body><p>No answer generated.</p></body></html>";
         }
-
-        // Convert markdown-style code blocks to HTML
         StringBuilder html = new StringBuilder("<html><body>");
-
-        // Process code blocks
         String[] lines = answer.split("\n");
         boolean inCodeBlock = false;
         StringBuilder codeBlock = new StringBuilder();
-        String codeLanguage = "";
-
         for (String line : lines) {
             if (line.startsWith("```")) {
                 if (inCodeBlock) {
-                    // End of code block
-                    html.append("<pre><code>");
-                    html.append(escapeHtml(codeBlock.toString()));
-                    html.append("</code></pre>");
-                    codeBlock = new StringBuilder();
+                    html.append("<pre><code>").append(escapeHtml(codeBlock.toString())).append("</code></pre>");
+                    codeBlock.setLength(0);
                     inCodeBlock = false;
                 } else {
-                    // Start of code block
                     inCodeBlock = true;
-                    codeLanguage = line.length() > 3 ? line.substring(3).trim() : "";
                 }
             } else if (inCodeBlock) {
                 codeBlock.append(line).append("\n");
             } else {
-                // Regular text - handle inline code
-                String processedLine = line;
-
-                // Replace inline code
-                while (processedLine.contains("`")) {
-                    int start = processedLine.indexOf("`");
-                    int end = processedLine.indexOf("`", start + 1);
-
-                    if (end > start) {
-                        String before = processedLine.substring(0, start);
-                        String code = processedLine.substring(start + 1, end);
-                        String after = processedLine.substring(end + 1);
-
-                        processedLine = before + "<code>" + escapeHtml(code) + "</code>" + after;
-                    } else {
-                        break;
-                    }
-                }
-
-                // Add paragraph breaks
-                if (processedLine.trim().isEmpty()) {
-                    html.append("<br/><br/>");
-                } else {
-                    html.append("<p>").append(processedLine).append("</p>");
-                }
+                String processedLine = line.replaceAll("`([^`]+)`", "<code>$1</code>");
+                html.append("<p>").append(processedLine).append("</p>");
             }
         }
-
-        // Handle any remaining code block
         if (inCodeBlock && codeBlock.length() > 0) {
-            html.append("<pre><code>");
-            html.append(escapeHtml(codeBlock.toString()));
-            html.append("</code></pre>");
+            html.append("<pre><code>").append(escapeHtml(codeBlock.toString())).append("</code></pre>");
         }
-
         html.append("</body></html>");
         return html.toString();
     }
 
     private String escapeHtml(String text) {
-        return text.replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-                .replace("\"", "&quot;")
-                .replace("'", "&#39;");
+        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                .replace("\"", "&quot;").replace("'", "&#39;");
     }
 
     private void copyAnswerToClipboard() {
-        String plainText = answerPane.getText();
-
-        // Strip HTML tags for plain text
-        plainText = plainText.replaceAll("<[^>]*>", "");
-
+        String plainText = answerPane.getText().replaceAll("<[^>]*>", "").trim();
         Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(plainText), null);
         statusLabel.setText("Answer copied to clipboard");
     }

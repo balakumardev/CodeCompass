@@ -14,7 +14,7 @@ public class VectorDBService {
     private static final String CONFIG_FILE = "codemapper_config.json";
     private static final String QDRANT_URL = "http://localhost:6333";
     private final Path dbPath;
-    private final AIService aiService;
+    private final EmbeddingService aiService;
     private final OkHttpClient client;
     private final Gson gson;
     private final AtomicInteger documentCount = new AtomicInteger(0);
@@ -24,7 +24,7 @@ public class VectorDBService {
     private static final int RETRY_DELAY_MS = 2000;
     private static final float DEFAULT_SIMILARITY_THRESHOLD = 0.5f;
 
-    public VectorDBService(String projectPath, AIService aiService) throws IOException {
+    public VectorDBService(String projectPath, EmbeddingService aiService) throws IOException {
         this.aiService = aiService;
         this.client = new OkHttpClient.Builder()
                 .connectTimeout(60, TimeUnit.SECONDS)

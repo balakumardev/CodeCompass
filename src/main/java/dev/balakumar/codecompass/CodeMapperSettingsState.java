@@ -10,8 +10,9 @@ import org.jetbrains.annotations.Nullable;
 
 @State(name = "CodeMapperSettings", storages = @Storage("codeMapperSettings.xml"))
 public class CodeMapperSettingsState implements PersistentStateComponent<CodeMapperSettingsState> {
-    // AI Provider selection
-    public String aiProvider = "OPENROUTER";
+    // Provider selections
+    public String embeddingProvider = "GEMINI";
+    public String generationProvider = "OPENROUTER";
     public boolean enableStartupIndexing = false;
 
     // API Keys
@@ -20,7 +21,6 @@ public class CodeMapperSettingsState implements PersistentStateComponent<CodeMap
     public String ollamaEndpoint = "http://localhost:11434";
 
     // Embedding Models
-    public String openRouterEmbeddingModel = "openai/text-embedding-3-small";
     public String geminiEmbeddingModel = "embedding-001";
     public String ollamaEmbeddingModel = "nomic-embed-text";
 
@@ -37,19 +37,16 @@ public class CodeMapperSettingsState implements PersistentStateComponent<CodeMap
 
     @Override
     public void loadState(@NotNull CodeMapperSettingsState state) {
-        this.aiProvider = state.aiProvider;
+        this.embeddingProvider = state.embeddingProvider;
+        this.generationProvider = state.generationProvider;
         this.enableStartupIndexing = state.enableStartupIndexing;
-
         // API Keys
         this.openRouterApiKey = state.openRouterApiKey;
         this.geminiApiKey = state.geminiApiKey;
         this.ollamaEndpoint = state.ollamaEndpoint;
-
         // Embedding Models
-        this.openRouterEmbeddingModel = state.openRouterEmbeddingModel;
         this.geminiEmbeddingModel = state.geminiEmbeddingModel;
         this.ollamaEmbeddingModel = state.ollamaEmbeddingModel;
-
         // Generation Models
         this.openRouterGenerationModel = state.openRouterGenerationModel;
         this.geminiGenerationModel = state.geminiGenerationModel;

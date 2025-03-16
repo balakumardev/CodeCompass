@@ -77,7 +77,7 @@ public class StartupIndexer implements ProjectActivity {
 
                 try {
                     // Check AI service
-                    AIService aiService = ProviderSettings.getAIService(project);
+                    EmbeddingService aiService = ProviderSettings.getEmbeddingService(project);
                     aiServiceName = aiService.getClass().getSimpleName().replace("Service", "");
                     aiServiceAvailable = aiService.testConnection();
 

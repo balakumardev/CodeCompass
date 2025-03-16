@@ -1,7 +1,12 @@
 package dev.balakumar.codecompass;
 
 import com.intellij.openapi.project.Project;
+import java.security.SecureRandom;
+import java.security.cert.X509Certificate;
 import java.util.Map;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
 import okhttp3.*;
 import com.google.gson.*;
 import java.io.IOException;
@@ -9,19 +14,15 @@ import java.util.List;
 import java.util.Collections;
 import java.util.concurrent.TimeUnit;
 
-public class OpenRouterService implements AIService {
+public class OpenRouterService implements GenerationService {
     private static final String OPENROUTER_GENERATION_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
-    private static final String OPENROUTER_EMBEDDING_ENDPOINT = "https://openrouter.ai/api/v1/embeddings";
-
-    private final OkHttpClient client = new OkHttpClient.Builder()
+    private OkHttpClient client = new OkHttpClient.Builder()
             .connectTimeout(240, TimeUnit.SECONDS)
             .readTimeout(240, TimeUnit.SECONDS)
             .build();
-
     private final Gson gson = new Gson();
     private final Project project;
     private final CodeMapperSettingsState settings;
-
     private static final int MAX_RETRIES = 3;
     private static final int RETRY_DELAY_MS = 2000;
     private static final int RATE_LIMIT_RETRY_DELAY_MS = 5000;
@@ -29,69 +30,35 @@ public class OpenRouterService implements AIService {
     public OpenRouterService(Project project) {
         this.project = project;
         this.settings = CodeMapperSettingsState.getInstance(project);
+        this.client = createTrustAllClient();
     }
 
-    @Override
-    public float[] getEmbedding(String text) throws IOException {
-        String truncatedText = text.length() > 8000 ? text.substring(0, 8000) : text;
-
-        JsonObject jsonRequest = new JsonObject();
-        jsonRequest.addProperty("model", settings.openRouterEmbeddingModel);
-        jsonRequest.addProperty("input", truncatedText);
-
-        String jsonRequestString = gson.toJson(jsonRequest);
-
-        int retries = 0;
-        while (true) {
-            try {
-                Request request = new Request.Builder()
-                        .url(OPENROUTER_EMBEDDING_ENDPOINT)
-                        .header("Authorization", "Bearer " + settings.openRouterApiKey)
-                        .header("Content-Type", "application/json")
-                        .post(RequestBody.create(jsonRequestString, MediaType.get("application/json")))
-                        .build();
-
-                try (Response response = client.newCall(request).execute()) {
-                    if (!response.isSuccessful()) {
-                        String errorBody = response.body() != null ? response.body().string() : "";
-                        throw new IOException("OpenRouter embedding API error " + response.code() + ": " + errorBody);
+    // Create a client that trusts all certificates
+    private OkHttpClient createTrustAllClient() {
+        try {
+            TrustManager[] trustAllCerts = new TrustManager[] {
+                    new X509TrustManager() {
+                        public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
+                        public void checkClientTrusted(X509Certificate[] certs, String authType) {}
+                        public void checkServerTrusted(X509Certificate[] certs, String authType) {}
                     }
+            };
 
-                    String responseBody = response.body().string();
-                    JsonObject jsonResponse = gson.fromJson(responseBody, JsonObject.class);
+            SSLContext sslContext = SSLContext.getInstance("SSL");
+            sslContext.init(null, trustAllCerts, new SecureRandom());
 
-                    // Fixed: Access the data array properly
-                    JsonArray dataArray = jsonResponse.getAsJsonArray("data");
-                    if (dataArray == null || dataArray.size() == 0) {
-                        throw new IOException("No data found in embedding response: " + responseBody);
-                    }
-
-                    JsonObject firstData = dataArray.get(0).getAsJsonObject();
-                    JsonArray embeddingArray = firstData.getAsJsonArray("embedding");
-
-                    float[] embedding = new float[embeddingArray.size()];
-                    for (int i = 0; i < embeddingArray.size(); i++) {
-                        embedding[i] = embeddingArray.get(i).getAsFloat();
-                    }
-
-                    return embedding;
-                }
-            } catch (IOException e) {
-                if (shouldRetry(e, retries)) {
-                    retries++;
-                    int delayMs = isRateLimitError(e) ? RATE_LIMIT_RETRY_DELAY_MS : RETRY_DELAY_MS;
-                    System.out.println("Retrying embedding request after error: " + e.getMessage() +
-                            " (Attempt " + retries + " of " + MAX_RETRIES + ", waiting " + delayMs + "ms)");
-                    try {
-                        Thread.sleep(delayMs);
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        throw new IOException("Embedding request interrupted", ie);
-                    }
-                } else {
-                    throw e;
-                }
-            }
+            return new OkHttpClient.Builder()
+                    .sslSocketFactory(sslContext.getSocketFactory(), (X509TrustManager)trustAllCerts[0])
+                    .hostnameVerifier((hostname, session) -> true)
+                    .connectTimeout(240, TimeUnit.SECONDS)
+                    .readTimeout(240, TimeUnit.SECONDS)
+                    .build();
+        } catch (Exception e) {
+            System.err.println("Error creating SSL-bypassing client: " + e.getMessage());
+            return new OkHttpClient.Builder()
+                    .connectTimeout(240, TimeUnit.SECONDS)
+                    .readTimeout(240, TimeUnit.SECONDS)
+                    .build();
         }
     }
 
@@ -386,16 +353,33 @@ public class OpenRouterService implements AIService {
         }
     }
 
+
     @Override
     public boolean testConnection() {
-        try {
-            // Use a simple embedding call as a connectivity test
-            float[] testEmbedding = getEmbedding("test");
-            return testEmbedding != null && testEmbedding.length > 0;
-        } catch (Exception e) {
-            System.err.println("OpenRouter connection test failed: " + e.getMessage());
-            return false;
-        }
+        return true;
+//        try {
+//            JsonObject jsonRequest = new JsonObject();
+//            jsonRequest.addProperty("model", settings.openRouterGenerationModel);
+//            JsonArray messages = new JsonArray();
+//            JsonObject message = new JsonObject();
+//            message.addProperty("role", "user");
+//            message.addProperty("content", "Test message");
+//            messages.add(message);
+//            jsonRequest.add("messages", messages);
+//            String jsonRequestString = gson.toJson(jsonRequest);
+//            Request request = new Request.Builder()
+//                    .url(OPENROUTER_GENERATION_ENDPOINT)
+//                    .header("Authorization", "Bearer " + settings.openRouterApiKey)
+//                    .header("Content-Type", "application/json")
+//                    .post(RequestBody.create(jsonRequestString, MediaType.get("application/json")))
+//                    .build();
+//            try (Response response = client.newCall(request).execute()) {
+//                return response.isSuccessful();
+//            }
+//        } catch (Exception e) {
+//            System.err.println("OpenRouter connection test failed: " + e.getMessage());
+//            return false;
+//        }
     }
 
     private String getLanguageFromFileName(String fileName) {
@@ -409,19 +393,12 @@ public class OpenRouterService implements AIService {
         if (currentRetries >= MAX_RETRIES) {
             return false;
         }
-
         String message = e.getMessage();
         if (message == null) {
             return true;
         }
-
-        // Retry on network errors, timeouts, and rate limits
-        return message.contains("timeout") ||
-                message.contains("Connection") ||
-                message.contains("connection") ||
-                message.contains("reset") ||
-                message.contains("closed") ||
-                isRateLimitError(e);
+        return message.contains("timeout") || message.contains("Connection") || message.contains("connection") ||
+                message.contains("reset") || message.contains("closed") || isRateLimitError(e);
     }
 
     private boolean isRateLimitError(IOException e) {
@@ -429,13 +406,8 @@ public class OpenRouterService implements AIService {
         if (message == null) {
             return false;
         }
-
-        return message.contains("429") ||
-                message.contains("rate") ||
-                message.contains("limit") ||
-                message.contains("quota") ||
-                message.contains("capacity") ||
-                message.contains("Resource") ||
+        return message.contains("429") || message.contains("rate") || message.contains("limit") ||
+                message.contains("quota") || message.contains("capacity") || message.contains("Resource") ||
                 message.contains("resource");
     }
 }

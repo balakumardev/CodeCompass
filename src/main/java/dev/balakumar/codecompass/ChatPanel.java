@@ -41,7 +41,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class ChatPanel extends SimpleToolWindowPanel {
     private final Project project;
     private SimpleIndexer indexer;
-    private AIService aiService;
+    private GenerationService aiService;
     private final JPanel messagesPanel;
     private final JTextPane inputArea;
     private final JScrollPane scrollPane;
@@ -323,7 +323,7 @@ public class ChatPanel extends SimpleToolWindowPanel {
 
                 // Then try to create the AI service
                 try {
-                    aiService = ProviderSettings.getAIService(project);
+                    aiService = ProviderSettings.getGenerationService(project);
                     SwingUtilities.invokeLater(() -> {
                         statusLabel.setText("AI service initialized, checking connection...");
                     });
